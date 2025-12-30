@@ -45,6 +45,8 @@ library(mvabund)
 library(units) 
 library(memoise) 
 library(glue)
+library(httr)
+library(jsonlite)
 #'
 #' # Load data
 #' ## California boundary shapefile

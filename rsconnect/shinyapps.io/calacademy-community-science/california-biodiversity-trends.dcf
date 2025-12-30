@@ -5,7 +5,7 @@ account: calacademy-community-science
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 15075201
-bundleId: 11383529
+bundleId: 11383794
 url: https://calacademy-community-science.shinyapps.io/california-biodiversity-trends/
 version: 1
 asMultiple: FALSE
