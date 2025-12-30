@@ -1,12 +1,3 @@
-#' # Load libraries
-app_libraries <- c("tidyverse", ### data manipulation
-                   "shiny", "shinyjs", "shinyWidgets", "shinydashboard", "shinycssloaders", "shinyBS", "shinybusy",  ### shiny
-                   "sf", "terra", "leaflet", "leaflet.extras", "leaflet.minicharts", "leafpm", "h3jsr", "esri2sf", "leafgl",   ### spatial
-                   "plotly", "htmltools", "htmlwidgets", "sortable", "DT", "flexdashboard", "dygraphs", "bslib",   ### interactive
-                   "natserv", "duckdbfs", "picante", "ecoCopula", "mvabund", ### data 
-                   "units", "memoise", "glue"
-)
-lapply(app_libraries, library, character.only = TRUE)
 ## Set things up
 CACHE <-  "/tmp/Rtmp-urban" # "cache/"
 duckdbfs::load_h3()
@@ -16,6 +7,16 @@ DBI::dbExecute(con, "SET threads = 60;")
 aws_public_endpoint <- "minio.carlboettiger.info"
 aws_s3_endpoint <- "minio.carlboettiger.info"
 #'
+## Read .rds object from GitHub repository
+read_github_rds <- function(owner, repo, path, file, branch = "main") {
+  url <- sprintf(
+    "https://raw.githubusercontent.com/%s/%s/%s/%s/%s",
+    owner, repo, branch, path, file
+  )
+  tmp <- tempfile(fileext = ".rds")
+  download.file(url, tmp, mode = "wb", quiet = TRUE)
+  readRDS(tmp)
+}
 ## Extract GBIF data
 get_gbif_data <- memoise(function(aoi) {
   # identify h10 cells overlapping area of interest :
@@ -718,9 +719,9 @@ plot_yearly_trends <- memoise(function(sd_dat, metric = c("proportion_observatio
    
  }
   
-  gg <- plotly_build(p) %>%
-    config(displayModeBar = FALSE) %>%
-    layout(# plot_bgcolor  = "rgba(0, 0, 0, 0)",
+  gg <- plotly::plotly_build(p) %>%
+    plotly::config(displayModeBar = FALSE) %>%
+    plotly::layout(# plot_bgcolor  = "rgba(0, 0, 0, 0)",
       paper_bgcolor = "rgba(0, 0, 0, 0)",
       font = list(family = "Helvetica", size = 14), 
       xaxis = list(titlefont = list(size = 13),

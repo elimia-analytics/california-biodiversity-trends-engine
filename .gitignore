@@ -11,7 +11,7 @@
 .Ruserdata
 
 # Data backup folder
-data/backup
+backup/
 
 # RStudio files
 .Rproj.user/

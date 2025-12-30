@@ -4,27 +4,46 @@
 #'
 #' # Server setup
 #' # Load libraries
-app_libraries <- c("tidyverse", ### data manipulation
-                  "shiny", "shinyjs", "shinyWidgets", "shinydashboard", "shinycssloaders", "shinyBS", "shinybusy",  ### shiny
-                 "sf", "terra", "leaflet", "leaflet.extras", "leaflet.minicharts", "leafpm", "h3jsr", "esri2sf", "leafgl",   ### spatial
-                 "plotly", "htmltools", "htmlwidgets", "sortable", "DT", "flexdashboard", "dygraphs", "bslib",   ### interactive
-                 "natserv", "duckdbfs", "picante", "ecoCopula", "mvabund", ### data 
-                 "units", "memoise", "glue"
-)
-lapply(app_libraries, library, character.only = TRUE)
-library(leaflet.minicharts)
-library(leafgl)
-library(sortable)
-library(flexdashboard)
-library(dygraphs)
-library(bslib)
-library(natserv)
-library(duckdbfs)
-library(picante)
-library(ecoCopula)
+# app_libraries <- c("tidyverse", ### data manipulation
+#                   "shiny", "shinyjs", "shinyWidgets", "shinydashboard", "shinycssloaders", "shinyBS", "shinybusy",  ### shiny
+#                  "sf", "terra", "leaflet", "leaflet.extras", "leaflet.minicharts", "leafpm", "h3jsr", "esri2sf", "leafgl",   ### spatial
+#                  "plotly", "htmltools", "htmlwidgets", "sortable", "DT", "flexdashboard", "dygraphs", "bslib",   ### interactive
+#                  "natserv", "duckdbfs", "picante", "ecoCopula", "mvabund", ### data 
+#                  "units", "memoise", "glue"
+# )
+# lapply(app_libraries, library, character.only = TRUE)
+library(tidyverse)
+library(shiny) 
+library(shinyjs) 
+library(shinyWidgets) 
+library(shinydashboard) 
+library(shinycssloaders) 
+library(shinyBS) 
+library(shinybusy) 
+library(sf) 
+library(terra) 
+library(leaflet) 
+library(leaflet.extras) 
+library(leaflet.minicharts) 
+library(leafpm) 
+library(h3jsr) 
+library(esri2sf) 
+library(leafgl)   
+library(plotly) 
+library(htmltools) 
+library(htmlwidgets) 
+library(sortable) 
+library(DT) 
+library(flexdashboard) 
+library(dygraphs) 
+library(bslib) 
+library(natserv) 
+library(duckdbfs) 
+library(picante) 
+library(ecoCopula) 
 library(mvabund)
-library(units)
-library(memoise)
+library(units) 
+library(memoise) 
 library(glue)
 #'
 #' # Load data
@@ -34,6 +53,10 @@ ca_boundary <- readRDS("data/boundaries/ca_boundary.rds")
 aoi_polygons <- readRDS("data/boundaries/aoi_polygons.rds") %>% 
   dplyr::filter(aoi_name %in% gsub("_data.rds", "", list.files("data/outputs")))
 #'
+aoi_available_outputs <- fromJSON(content(GET("https://api.github.com/repos/elimia-analytics/california-biodiversity-trends-engine/contents/data/outputs"), "text", encoding = "UTF-8"))
+aoi_available_outputs <- aoi_available_outputs$name[grepl("\\.rds$", aoi_available_outputs$name)]
+aoi_available_outputs
+
 #' ## Load custom functions to support app functionality 
 source("biodiversity_trends_engine_functions.R")
 #' 
@@ -289,9 +312,17 @@ function(input, output, session) {
     if (!is.null(area_of_interest$boundary)){
 
     # Load cached data, if preloaded area of interest
-    if (input$select_map_aoi %in% gsub("_data.rds", "", list.files("data/outputs"))){
+    # if (input$select_map_aoi %in% gsub("_data.rds", "", list.files("data/outputs"))){
+      if (input$select_map_aoi %in% gsub("_data.rds", "", aoi_available_outputs)){ 
       
-      aoi <- readRDS(paste0("data/outputs/", input$select_map_aoi, "_data.rds"))
+      # aoi <- readRDS(paste0("data/outputs/", input$select_map_aoi, "_data.rds"))
+      
+      aoi <- read_github_rds(
+          owner = "elimia-analytics",
+          repo  = "california-biodiversity-trends-engine",
+          path  = "data/outputs",
+          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data.rds"))
+        )
       
       area_of_interest$boundary <- aoi$boundary
       area_of_interest$baseline <- aoi$baseline
@@ -1207,9 +1238,14 @@ function(input, output, session) {
 
     if (!is.null(area_of_interest$gbif_data) & input$pages == "TRENDS"){
 
-      if (input$select_map_aoi %in% gsub("_data.rds", "", list.files("data/outputs"))){
-
-        aoi <- readRDS(paste0("data/outputs/", input$select_map_aoi, "_data.rds"))
+      if (input$select_map_aoi %in% gsub("_data.rds", "", aoi_available_outputs)){ 
+        
+        aoi <- read_github_rds(
+          owner = "elimia-analytics",
+          repo  = "california-biodiversity-trends-engine",
+          path  = "data/outputs",
+          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data.rds"))
+        )
 
         area_of_interest$trends_table <- aoi$trends_table
         area_of_interest$species_trends_list <- aoi$species_trends_list
@@ -1464,6 +1500,8 @@ function(input, output, session) {
 
         output$species_trends_output <- plotly::renderPlotly({
 
+          assign("sd_dat", area_of_interest$species_trends_list[[focal_taxon_name]]$yearly_trend, pos = 1)
+          
           yearly_plot <- plot_yearly_trends(area_of_interest$species_trends_list[[focal_taxon_name]]$yearly_trend, metric = "reporting_rate")
 
           yearly_plot
