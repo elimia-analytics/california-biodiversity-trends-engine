@@ -1,0 +1,27 @@
+{
+    "id": "31A45709",
+    "path": "~/Library/CloudStorage/Dropbox/elimia/code/apps/biodiversity-trends-engine/code/get_aoi_polygons.R",
+    "project_path": "code/get_aoi_polygons.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1762987474821.0,
+    "source_on_save": false,
+    "relative_order": 1,
+    "properties": {
+        "tempName": "Untitled2",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "78,0",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1763512109,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1763512109471,
+    "read_only": false,
+    "read_only_alternatives": []
+}

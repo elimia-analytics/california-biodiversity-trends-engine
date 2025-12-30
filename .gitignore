@@ -1,0 +1,15 @@
+# History files
+.Rhistory
+.Rapp.history
+
+# Session Data files
+.RData
+.RDataTmp
+.RProj
+
+# User-specific files
+.Ruserdata
+
+# Data backup folder
+data/backup
+
