@@ -3,7 +3,7 @@
     "path": "~/Library/CloudStorage/Dropbox/elimia/code/apps/biodiversity-trends-engine/.gitignore",
     "project_path": ".gitignore",
     "type": "gitignore",
-    "hash": "1963935017",
+    "hash": "484481189",
     "contents": "",
     "dirty": false,
     "created": 1767119879681.0,
@@ -12,15 +12,15 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "12,16",
-        "scrollLine": "0"
+        "cursorPosition": "17,11",
+        "scrollLine": "1"
     },
     "folds": "",
-    "lastKnownWriteTime": 1767119998,
+    "lastKnownWriteTime": 1767120162,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1767119998677,
+    "last_content_update": 1767120162355,
     "read_only": false,
     "read_only_alternatives": []
 }
