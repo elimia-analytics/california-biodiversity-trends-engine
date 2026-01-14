@@ -685,7 +685,7 @@ plot_yearly_trends <- memoise(function(sd_dat, metric = c("proportion_observatio
     geom_hline(yintercept = -1.96, colour = grey(.5), size = .5) +
     geom_line(colour = "tomato", size = 1.2, alpha = 1) +
     ylab(paste0(metric_labs %>% dplyr::filter(metric_name == metric) %>% dplyr::pull(metric_lab), "\n anomaly")) +
-    xlab("Year") +
+    xlab("") +
     xlim(lim_x) +
     # annotate("text", x = quantile(temporal_trend_data$year, .20), y = 1.08, label = paste0("Modeled probability of detection", rep(" ", num_chars_missing[[4]])), hjust = 1) +
     theme_linedraw() +
@@ -705,7 +705,7 @@ plot_yearly_trends <- memoise(function(sd_dat, metric = c("proportion_observatio
      ylab(metric_labs %>% dplyr::filter(metric_name == metric) %>% dplyr::pull(metric_lab)) +
      xlab("") +
      # annotate("text", x = quantile(temporal_trend_data$year, .21), y = max(temporal_trend_data$proportion_observations)+(0.08 *max(temporal_trend_data$proportion_observations)), label = paste0("Proportion of Observations"), hjust = 1) +
-     xlab("Year") +
+     xlab("") +
      xlim(lim_x) +
      theme_linedraw() +
      theme(legend.position = "none",

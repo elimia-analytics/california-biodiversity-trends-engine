@@ -53,7 +53,8 @@ library(jsonlite)
 ca_boundary <- readRDS("data/boundaries/ca_boundary.rds")
 #' ## Pre-loaded areas of interest polygons
 aoi_polygons <- readRDS("data/boundaries/aoi_polygons.rds") %>% 
-  dplyr::filter(aoi_name %in% gsub("_data.rds", "", list.files("data/outputs")))
+  dplyr::filter(aoi_name %in% gsub("_data.rds", "", list.files("data/outputs"))) %>% 
+  dplyr::arrange(aoi_name)
 #'
 aoi_available_outputs <- fromJSON(content(GET("https://api.github.com/repos/elimia-analytics/california-biodiversity-trends-engine/contents/data/outputs"), "text", encoding = "UTF-8"))
 aoi_available_outputs <- aoi_available_outputs$name[grepl("\\.rds$", aoi_available_outputs$name)]
@@ -543,7 +544,7 @@ function(input, output, session) {
         
         # Add occurrences to map
         m <- leafletProxy("main_map") %>%
-          clearShapes() %>%
+          # clearShapes() %>%
           clearControls() %>%
           clearGroup("Records") %>% 
           clearGroup("h3") %>%
@@ -788,107 +789,107 @@ function(input, output, session) {
 
   output$taxa_donut <- plotly::renderPlotly({
     
-    if (!is.null(area_of_interest$gbif_data)){
-
+    if (!is.null(area_of_interest$gbif_data_filtered)){
+      
       if (isTRUE(input$redo_search)){
-        dat <- filtered_data() %>%
+        dat <- area_of_interest$gbif_data_filtered %>%
           dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east)
       } else {
-        dat <- filtered_data()
+        dat <- area_of_interest$gbif_data_filtered
       }
       
-    dat <- dat %>%
-      # dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east) %>%
-      sf::st_set_geometry(NULL) %>%
-      dplyr::filter(complete.cases(kingdom, phylum, class, order, family, genus)) %>% 
-      dplyr::distinct(kingdom, phylum, class, order, family, genus, .keep_all = TRUE) %>% 
-      dplyr::mutate(
-        classification_path = paste0(paste("Life", kingdom, phylum, class, order, family, genus, sep = "|"), "|")
-      ) 
-    
-    idees <- purrr::map(c("kingdom", "phylum", "class", "order", "family", "genus"), function(x) dat[[x]] %>% unique()) %>% unlist() %>% na.omit() %>% as.character()
-    parentals <- purrr::map(1:length(idees), function(i){
-      target_class_path <- dat$classification_path[grep(paste0("\\|", idees[i], "\\|"), dat$classification_path)[1]]
-      target_class_path_names <- (target_class_path %>% strsplit("\\|"))[[1]]
-      target_class_path_names[grep(paste0("^", idees[i], "$"), target_class_path_names) - 1]
-    })
-    parentals <- c("", purrr::map(parentals, function(x) ifelse(length(x) > 0, x, "Life")) %>% unlist())
-    idees <- c("Life", idees)
-    
-    trace1 <- list(
-      leaf = list(opacity = 1),
-      meta = list(columnNames = list(
-        ids = "data.0.ids",
-        labels = "data.0.labels",
-        parents = "data.0.parents"
-      )),
-      type = "sunburst",
-      level = center_taxon$name,
-      idssrc = "kirudang:0:8e4421",
-      ids = idees,
-      maxdepth = 3,
-      rotation = -4,
-      labelssrc = "kirudang:0:21e923",
-      labels = idees,
-      parentssrc = "kirudang:0:dc20c3",
-      parents = parentals,
-      hovertemplate = idees
-    )
-    data <- list(trace1)
-    layout <- list(
-      font = list(
-        size = 12,
-        color = "rgb(165, 25, 25)",
-        family = "Roboto"
-      ),
-      xaxis = list(
-        range = c(-1, 4),
-        autorange = TRUE,
-        fixedrange = TRUE
-      ),
-      yaxis = list(
-        range = c(-1, 4),
-        autorange = TRUE,
-        fixedrange = TRUE
-      ),
-      height = "100%",
-      width = "100%",
-      margin = list(
-        b = 0,
-        r = 0,
-        l = 0,
-        t = 0,
-        pad = 0
-      ),
-      metasrc = "kirudang:0:023680",
-      meta = c("white", "#EF553B", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "rgb(252,195,195)", "rgb(252,195,195)", "#00CC96", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(141,211,199)", "rgb(141,211,199)", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#ffe600", "#faf693", "#faf693", "#faf693", "#ffd857", "#ffd857", "#ffd857", "#ffd857", "#fff16b", "#fff16b", "#fff16b", "#fff16b", "#ffb300", "#ffb300", "#ffb300", "#ffb300", "#ffb300", "#fcffc2", "#fcffc2", "#ff5ac3", "#ff5ac3", "#ff5ac3", "#ff5ac3", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#AB63FA", "#AB63FA", "#AB63FA"),
-      modebar = list(orientation = "v"),
-      autosize = TRUE,
-      dragmode = "select",
-      clickmode = "event",
-      hovermode = "x",
-      hoverlabel = list(
+      dat <- dat %>%
+        # dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east) %>%
+        sf::st_set_geometry(NULL) %>%
+        dplyr::filter(complete.cases(kingdom, phylum, class, order, family, genus)) %>% 
+        dplyr::distinct(kingdom, phylum, class, order, family, genus, .keep_all = TRUE) %>% 
+        dplyr::mutate(
+          classification_path = paste0(paste("Life", kingdom, phylum, class, order, family, genus, sep = "|"), "|")
+        ) 
+      
+      idees <- purrr::map(c("kingdom", "phylum", "class", "order", "family", "genus"), function(x) dat[[x]] %>% unique()) %>% unlist() %>% na.omit() %>% as.character()
+      parentals <- purrr::map(1:length(idees), function(i){
+        target_class_path <- dat$classification_path[grep(paste0("\\|", idees[i], "\\|"), dat$classification_path)[1]]
+        target_class_path_names <- (target_class_path %>% strsplit("\\|"))[[1]]
+        target_class_path_names[grep(paste0("^", idees[i], "$"), target_class_path_names) - 1]
+      })
+      parentals <- c("", purrr::map(parentals, function(x) ifelse(length(x) > 0, x, "Life")) %>% unlist())
+      idees <- c("Life", idees)
+      
+      trace1 <- list(
+        leaf = list(opacity = 1),
+        meta = list(columnNames = list(
+          ids = "data.0.ids",
+          labels = "data.0.labels",
+          parents = "data.0.parents"
+        )),
+        type = "sunburst",
+        level = center_taxon$name,
+        idssrc = "kirudang:0:8e4421",
+        ids = idees,
+        maxdepth = 3,
+        rotation = -4,
+        labelssrc = "kirudang:0:21e923",
+        labels = idees,
+        parentssrc = "kirudang:0:dc20c3",
+        parents = parentals,
+        hovertemplate = idees
+      )
+      data <- list(trace1)
+      layout <- list(
         font = list(
           size = 12,
-          color = "#000",
-          family = "Droid Sans"
+          color = "rgb(165, 25, 25)",
+          family = "Roboto"
         ),
-        align = "auto",
-        bgcolor = "rgb(255, 255, 255)"
-      ),
-      separators = ", ",
-      uniformtext = list(mode = FALSE),
-      selectdirection = "v",
-      sunburstcolorway = c("#FF7F0F90","#2CA02C90","#D6272890","#1F77B490","#66666680")
-    )
-    p <- plot_ly(source = "taxa_plot", customdata = idees) %>%
-      config(displayModeBar = FALSE)
-    p <- add_trace(p, leaf=trace1$leaf, meta=trace1$meta, mode=trace1$mode, type=trace1$type, level=trace1$level, idssrc=trace1$idssrc, ids=trace1$ids, maxdepth=trace1$maxdepth, rotation=trace1$rotation, labelssrc=trace1$labelssrc, labels=trace1$labels, parentssrc=trace1$parentssrc, parents=trace1$parents)
-    p <- layout(p, font=layout$font, title=layout$title, xaxis=layout$xaxis, yaxis=layout$yaxis, margin=layout$margin, metasrc=layout$metasrc, meta=layout$meta, modebar=layout$modebar, autosize=layout$autosize, dragmode=layout$dragmode, template=layout$template, clickmode=layout$clickmode, hovermode=layout$hovermode, hoverlabel=layout$hoverlabel, separators=layout$separators, uniformtext=layout$uniformtext, selectdirection=layout$selectdirection, sunburstcolorway=layout$sunburstcolorway, extendsunburstcolors=layout$extendsunburstcolors)
-    p <- p %>% event_register("plotly_sunburstclick")
-    
-    p
-    
+        xaxis = list(
+          range = c(-1, 4),
+          autorange = TRUE,
+          fixedrange = TRUE
+        ),
+        yaxis = list(
+          range = c(-1, 4),
+          autorange = TRUE,
+          fixedrange = TRUE
+        ),
+        height = "100%",
+        width = "100%",
+        margin = list(
+          b = 0,
+          r = 0,
+          l = 0,
+          t = 0,
+          pad = 0
+        ),
+        metasrc = "kirudang:0:023680",
+        meta = c("white", "#EF553B", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "rgb(251,128,114)", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "#ba2020", "rgb(252,195,195)", "rgb(252,195,195)", "#00CC96", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(204,235,197)", "rgb(141,211,199)", "rgb(141,211,199)", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#a3e897", "#ffe600", "#faf693", "#faf693", "#faf693", "#ffd857", "#ffd857", "#ffd857", "#ffd857", "#fff16b", "#fff16b", "#fff16b", "#fff16b", "#ffb300", "#ffb300", "#ffb300", "#ffb300", "#ffb300", "#fcffc2", "#fcffc2", "#ff5ac3", "#ff5ac3", "#ff5ac3", "#ff5ac3", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#45abff", "#AB63FA", "#AB63FA", "#AB63FA"),
+        modebar = list(orientation = "v"),
+        autosize = TRUE,
+        dragmode = "select",
+        clickmode = "event",
+        hovermode = "x",
+        hoverlabel = list(
+          font = list(
+            size = 12,
+            color = "#000",
+            family = "Droid Sans"
+          ),
+          align = "auto",
+          bgcolor = "rgb(255, 255, 255)"
+        ),
+        separators = ", ",
+        uniformtext = list(mode = FALSE),
+        selectdirection = "v",
+        sunburstcolorway = c("#FF7F0F90","#2CA02C90","#D6272890","#1F77B490","#66666680")
+      )
+      p <- plotly::plot_ly(source = "taxa_plot", customdata = idees) %>%
+        plotly::config(displayModeBar = FALSE)
+      p <- plotly::add_trace(p, leaf=trace1$leaf, meta=trace1$meta, mode=trace1$mode, type=trace1$type, level=trace1$level, idssrc=trace1$idssrc, ids=trace1$ids, maxdepth=trace1$maxdepth, rotation=trace1$rotation, labelssrc=trace1$labelssrc, labels=trace1$labels, parentssrc=trace1$parentssrc, parents=trace1$parents)
+      p <- plotly::layout(p, font=layout$font, title=layout$title, xaxis=layout$xaxis, yaxis=layout$yaxis, margin=layout$margin, metasrc=layout$metasrc, meta=layout$meta, modebar=layout$modebar, autosize=layout$autosize, dragmode=layout$dragmode, template=layout$template, clickmode=layout$clickmode, hovermode=layout$hovermode, hoverlabel=layout$hoverlabel, separators=layout$separators, uniformtext=layout$uniformtext, selectdirection=layout$selectdirection, sunburstcolorway=layout$sunburstcolorway, extendsunburstcolors=layout$extendsunburstcolors)
+      p <- p %>% plotly::event_register("plotly_sunburstclick")
+      
+      p
+      
     }
   })
 
@@ -1538,8 +1539,10 @@ function(input, output, session) {
             leaflet::addPolygons(
               data = area_of_interest$boundary,
               color = grey(.2),
-              fillOpacity = 0.1,
-              fill = TRUE,
+              opacity = 0.2,
+              fillOpacity = 0.3,
+              weight = 0.5,
+              fill = grey(.2),
               options = pathOptions(pane = "area_of_interest"),
               group = "Area of Interest"
             ) %>%
@@ -1589,16 +1592,16 @@ function(input, output, session) {
 
           spatial_pattern <- area_of_interest$species_trends_list[[focal_taxon_name]]$spatial_pattern
           spatial_pattern <- spatial_pattern[match(spatiotemporal_trends_data_pts$h5, spatial_pattern$h5), ]
-          count_pal <- colorNumeric("Blues", spatial_pattern$focal_species_count, na.color = "transparent")
+          count_pal <- colorNumeric("Oranges", spatial_pattern$focal_species_count, na.color = "transparent")
 
           m <- m %>%
             addPolygons(
               data = spatiotemporal_trends_data,
-              fillOpacity = 0.3,
+              fillOpacity = 0.2,
               fillColor = ~count_pal(spatial_pattern$focal_species_count),
               color = grey(.2),
-              weight = 0.5,
-              opacity = 0.5,
+              weight = 0.7,
+              opacity = 0.8,
               popup = leafpop::popupTable(spatial_pattern, row.numbers = FALSE, feature.id = FALSE),
             ) %>%
             addMinicharts(
@@ -1607,10 +1610,11 @@ function(input, output, session) {
               chartdata = spatiotemporal_trends_data_list$below %>% as.matrix() %>% round(3),
               type = "bar",
               width = 120,
-              height = 60,
-              maxValues = 4,
-              colorPalette = "#ef8a62",
+              height = 90,
+              maxValues = 3,
+              colorPalette = "#a50026",
               legend = FALSE,
+              opacity = 1
               #popup = popupArgs(html = tips_below)
             ) %>%
             addMinicharts(
@@ -1619,12 +1623,13 @@ function(input, output, session) {
               chartdata = spatiotemporal_trends_data_list$above %>% as.matrix() %>% round(3),
               type = "bar",
               width = 120,
-              height = 60,
-              maxValues = 4,
-              colorPalette = "#67a9cf",
+              height = 90,
+              maxValues = 3,
+              colorPalette = "#313695",
               legend = FALSE,
+              opacity = 1
               #popup = popupArgs(html = tips_above)
-            )
+            ) 
 
           m
 

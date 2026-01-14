@@ -38,7 +38,8 @@ library(glue)
 #' ## Load data
 #' ### Areas of interest polygons
 aoi_polygons <- readRDS("data/boundaries/aoi_polygons.rds") %>% 
-  dplyr::filter(aoi_name %in% gsub("_data.rds", "", list.files("data/outputs")))
+  dplyr::filter(aoi_name %in% gsub("_data.rds", "", list.files("data/outputs"))) %>% 
+  dplyr::arrange(aoi_name)
 #' ## Add custom Javascript
 scr <- tags$script(HTML(
   "
@@ -233,7 +234,8 @@ navbarPage(title = HTML("<span style='float: left; display: inline-block; paddin
                                                         column(width = 6, style = "width: 65vw; padding-right: 14px;",
                                                                leafletOutput("trends_map", height = "50vh")
                                                         ),
-                                                        column(width = 6, style = "width: 30vw;",
+                                                        column(width = 6, style = "width: 30vw; margin-top: 0;",
+                                                               h3("Reference taxa: most frequently observed with focal species", style = "padding-top: 0; margin-top: 0;"),
                                                                DT::dataTableOutput("association_table", height = "50vh")
                                                         )
                                                )
