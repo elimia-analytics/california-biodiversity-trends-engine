@@ -736,6 +736,79 @@ plot_yearly_trends <- memoise(function(sd_dat, metric = c("proportion_observatio
 cache = cache_filesystem(CACHE)
 )
 
+get_taxon_trends <- function(
+    focal_taxon,
+    metric = "reporting_rate_sd",
+    plot_label = NULL
+){
+  
+  if (length(focal_taxon) == 1){
+  ##### Identify focal taxon species
+  taxon_table <- area_of_interest$species_table %>% 
+    # dplyr::filter(class == "Amphibia") %>%
+    dplyr::filter_all(any_vars(. %in% focal_taxon))
+  } else {
+    taxon_table <- area_of_interest$species_table %>% 
+      # dplyr::filter(class == "Amphibia") %>%
+      dplyr::filter(`scientific name` %in% focal_taxon)
+  }
+  
+  ##### Isolate taxon trends
+  taxon_trends <- area_of_interest$species_trends_list[taxon_table$`scientific name`] %>% purrr::map("yearly_trend")
+  taxon_trends <- purrr::map(1:length(taxon_trends), function(sp){
+    dat <- taxon_trends[[sp]]
+    if ("reporting_rate_sd" %in% names(dat)){
+      out <- dat %>% 
+        dplyr::select(all_of(c("year", metric))) %>% 
+        purrr::set_names(c("year", names(taxon_trends)[sp]))
+    } else {
+      out <- NULL
+    }
+    out
+  })
+  taxon_trends <- taxon_trends[!purrr::map_lgl(taxon_trends, is.null)]
+  
+  ##### Combine amphibian trends in wide format
+  # taxon_trends_df <- data.frame(
+  #   year = taxon_trends %>% purrr::map("year") %>% unlist() %>% unique() %>% sort()
+  # ) %>% 
+  taxon_trends_df <- taxon_trends %>% 
+    plyr::join_all(
+      by = "year"
+    )
+  
+  taxon_trends_df <- taxon_trends_df %>% 
+    dplyr::mutate(
+      mean_metric = taxon_trends_df %>% dplyr::select(-year) %>% rowMeans(na.rm = TRUE)
+    )
+  
+  p <- taxon_trends_df %>% 
+    ggplot(aes(x=year)) +
+    geom_ribbon(aes(ymin = -1.96, ymax = 1.96), fill = grey(0.5), alpha = 0.4) +
+    geom_hline(yintercept = 0, colour = "black", size = 1) +
+    geom_hline(yintercept = 1.96, colour = grey(.5), size = .5) +
+    geom_hline(yintercept = -1.96, colour = grey(.5), size = .5) +
+    geom_line(aes(y=mean_metric), colour = "#d7191c", size = 1.2, alpha = 1) +
+    ylab("Reporting rate \n anomaly") +
+    xlab("") +
+    theme_linedraw() +
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(size = 9),
+          axis.text = element_text(size = 8)
+    )
+  
+  if (!is.null(plot_label)) p <- p + ggplot2::ggtitle(plot_label)
+  print(p)
+  
+  out <- list(
+    trends_data = taxon_trends_df,
+    trends_plot = p
+  )
+  
+  return(out)
+}
 # Wrapper to generate yearly trends figure
 # get_yearly_trend_wrapper <- memoise(function(
 #     analysis_records = area_of_interest$gbif_data, 

@@ -260,8 +260,63 @@ area_of_interest$focal_species_trends_table <- rbind(
     dplyr::slice_head(n = 5)
 )
 
-### STEP 8: Save output
-cat("STEP 8: Save output")
+### STEP 8: Identify major taxon trends
+focal_taxon_names <- c(
+  c("Aves", "Mammalia", "Squamata", "Amphibia", "Insecta"), # Animal classes
+  area_of_interest$gbif_data %>% sf::st_set_geometry(NULL) %>% dplyr::filter(kingdom == "Plantae") %>% dplyr::count(order) %>% dplyr::filter(n >= 1000) %>% dplyr::arrange(desc(n)) %>% dplyr::pull(order)
+)
+
+focal_taxon_trends <- purrr::map(focal_taxon_names, function(tax){
+  out <- get_taxon_trends(tax, plot_label = tax)
+  out
+}) %>% purrr::set_names(focal_taxon_names)
+  
+### STEP 9: Identify species-habitat relationships and trends
+whr_raster <- terra::rast("data/boundaries/tiff/ds1327.tif") 
+terra::activeCat(whr_raster) <- 3
+baseline_whr <- whr_raster %>% 
+  terra::crop(area_of_interest$baseline %>% sf::st_transform(crs(whr_raster)))
+trend_species <- area_of_interest$biggest_movers_table %>% 
+  dplyr::filter(trend != "needs more data") %>% 
+  dplyr::pull(species)
+trend_species_whr <- purrr::map(1:length(trend_species), function(sp){
+  
+  whr_table <- terra::extract(x = baseline_whr,
+                 y = area_of_interest$gbif_data %>% 
+                   dplyr::filter(species == trend_species[sp])
+  ) %>% 
+    dplyr::pull(WHRNUM) %>% 
+    table() %>% 
+    stack() %>% 
+    purrr::set_names(c("number_occurrences", "WHRNUM")) %>% 
+    dplyr::mutate(WHRNUM = as.character(WHRNUM) %>% as.numeric(WHRNUM),
+                  proportion_occurrences = number_occurrences/sum(number_occurrences, na.rm = TRUE),
+                  species = trend_species[sp]
+                  ) %>% 
+    dplyr::left_join(
+      terra::cats(baseline_whr)[[1]] %>% as.data.frame() %>% dplyr::select(WHRNUM, WHRNAME),
+      by = "WHRNUM"
+    ) %>% 
+    dplyr::distinct(., .keep_all = TRUE) 
+  
+}) %>% 
+  bind_rows()
+
+whr_trends <- purrr::map(which((trend_species_whr$WHRNAME %>% table() %>% sort(decreasing = TRUE)) >= 100) %>% names(), function(whr){
+  
+  print(whr)
+  whr_species <- trend_species_whr %>% dplyr::filter(WHRNAME == whr, proportion_occurrences >= 0.15) %>% dplyr::pull(species)
+  
+  if (length(whr_species) >= 1){
+  get_taxon_trends(focal_taxon = whr_species, plot_label = whr)
+  } else {
+    NULL
+  }
+  
+}) %>% purrr::set_names(which((trend_species_whr$WHRNAME %>% table() %>% sort(decreasing = TRUE)) >= 100) %>% names())
+
+### STEP 9: Save output
+cat("STEP 9: Save output")
 cat("\n")
 saveRDS(area_of_interest, paste0("data/outputs/", gsub("-|/", "_", area_of_interest$boundary$aoi_name), "_data.rds"))
 

@@ -752,11 +752,11 @@ function(input, output, session) {
         dat <- dat %>%
           sf::st_set_geometry(NULL) %>%
           dplyr::filter(complete.cases(year)) %>%
-          group_by(species) %>%
-          summarize(first_year = min(year)) %>%
-          count(first_year) %>%
-          arrange(first_year) %>%
-          mutate(cumulative_species = cumsum(n)) %>%
+          dplyr::group_by(species) %>%
+          dplyr::summarize(first_year = min(year)) %>%
+          dplyr::count(first_year) %>%
+          dplyr::arrange(first_year) %>%
+          dplyr::mutate(cumulative_species = cumsum(n)) %>%
           dplyr::ungroup() %>%
           dplyr::mutate(first_year = paste0(first_year, "-01-01") %>% as.Date())
         
@@ -1562,8 +1562,8 @@ function(input, output, session) {
           spatiotemporal_trends_data_pts_df <- spatiotemporal_trends_data_pts %>% dplyr::select(-all_of(names(spatiotemporal_trends_data_pts)[1])) %>% st_set_geometry(NULL)
 
           spatiotemporal_trends_data_list <- list(
-            below = spatiotemporal_trends_data_pts_df %>% mutate(across(everything(), ~ ifelse(. < 0, ., NA))),
-            above = spatiotemporal_trends_data_pts_df %>% mutate(across(everything(), ~ ifelse(. > 0, ., NA)))
+            below = spatiotemporal_trends_data_pts_df %>% dplyr::mutate(dplyr::across(everything(), ~ ifelse(. < 0, ., NA))),
+            above = spatiotemporal_trends_data_pts_df %>% dplyr::mutate(dplyr::across(everything(), ~ ifelse(. > 0, ., NA)))
           )
 
           # generate_tooltips <- function(dat) {
@@ -1615,8 +1615,8 @@ function(input, output, session) {
               colorPalette = "#a50026",
               legend = FALSE,
               opacity = 1
-              #popup = popupArgs(html = tips_below)
-            ) %>%
+              # popup = popupArgs(html = tips_below)
+            )  %>%
             addMinicharts(
               lng = st_coordinates(spatiotemporal_trends_data_pts)[, 1],
               lat = st_coordinates(spatiotemporal_trends_data_pts)[, 2],
@@ -1629,7 +1629,7 @@ function(input, output, session) {
               legend = FALSE,
               opacity = 1
               #popup = popupArgs(html = tips_above)
-            ) 
+            )
 
           m
 
