@@ -199,7 +199,7 @@ function(input, output, session) {
         group = "Preloaded Areas of Interest",
         label = aoi_polygons$aoi_name, 
         labelOptions = labelOptions(textOnly = TRUE, direction = "center", textsize = "15px", sticky = FALSE, style = list("color" = "black"))
-      )
+      ) 
     
     m
     
