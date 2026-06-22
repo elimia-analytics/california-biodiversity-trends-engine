@@ -13,6 +13,7 @@
 # )
 # lapply(app_libraries, library, character.only = TRUE)
 library(tidyverse)
+library(patchwork)
 library(shiny) 
 library(shinyjs) 
 library(shinyWidgets) 
@@ -27,13 +28,13 @@ library(leaflet.extras)
 library(leaflet.minicharts) 
 library(leafpm) 
 library(h3jsr) 
-library(esri2sf) 
 library(leafgl)   
 library(plotly) 
 library(htmltools) 
 library(htmlwidgets) 
 library(sortable) 
 library(DT) 
+library(reactable)
 library(flexdashboard) 
 library(dygraphs) 
 library(bslib) 
@@ -52,9 +53,17 @@ library(jsonlite)
 #' ## California boundary shapefile
 ca_boundary <- readRDS("data/boundaries/ca_boundary.rds")
 #' ## Pre-loaded areas of interest polygons
-aoi_polygons <- readRDS("data/boundaries/aoi_polygons.rds") %>% 
-  dplyr::filter(aoi_name %in% gsub("_data.rds", "", list.files("data/outputs"))) %>% 
-  dplyr::arrange(aoi_name)
+# aoi_polygons <- purrr::map(
+#   list.files("data/outputs", full.names = TRUE, pattern = "_data.rds$"), function(f){
+#     readRDS(f)$boundary
+#   }) %>% 
+#   bind_rows() %>% 
+#   dplyr::arrange(aoi_name)
+# saveRDS(aoi_polygons, "data/aoi_polygons.rds")
+aoi_polygons <- readRDS("data/aoi_polygons.rds") %>% 
+  sf::st_zm(drop = TRUE, what = "ZM") %>% 
+  dplyr::filter(aoi_name %in% gsub("_data_full.rds", "", list.files("data/outputs"))) %>% 
+  dplyr::arrange(aoi_name) 
 #'
 aoi_available_outputs <- fromJSON(content(GET("https://api.github.com/repos/elimia-analytics/california-biodiversity-trends-engine/contents/data/outputs"), "text", encoding = "UTF-8"))
 aoi_available_outputs <- aoi_available_outputs$name[grepl("\\.rds$", aoi_available_outputs$name)]
@@ -94,7 +103,7 @@ function(input, output, session) {
     biggest_movers_table = NULL,
     focal_species_trends_table = NULL
   )
-
+  
   ### Objects to store clicks and center values from the taxon sunburst chart
   clicked_taxa <- reactiveValues(taxon = vector(mode = "character"))
   center_taxon <- reactiveValues(name = "Life")
@@ -114,10 +123,10 @@ function(input, output, session) {
   selected_records <- reactiveValues(points = NULL)
   map_initial_zoom <- reactiveValues(value = NULL)
   map_zoom_cross <- reactiveValues(value = FALSE)
-
+  
   ## Object to detect "redo search in this area" button presses
   redo_search_button_presses <- reactiveValues(values = 0)
-
+  
   # Set up reactive functions
   ## Function to load user-uploaded data
   url_place <- reactive({
@@ -139,33 +148,43 @@ function(input, output, session) {
   
   ## Function to filter data based on filters
   filtered_data <- reactive({
-
+    
     if (!is.null(input$select_species)){
-
+      
       out <- area_of_interest$gbif_data %>%
         dplyr::filter(
           !(species %in% setdiff(species, input$select_species))
-          )
+        )
       
     } else {
       
       if (center_taxon$name != "Life"){
-
-      out <- area_of_interest$gbif_data %>%
-        dplyr::filter_all(any_vars(. %in% center_taxon$name))
-
-    } else {
-        out <- area_of_interest$gbif_data
+        
+        out <- area_of_interest$gbif_data %>%
+          dplyr::filter_all(any_vars(. %in% center_taxon$name))
+        
+      } else {
+        out <- area_of_interest$gbif_data 
+      }
     }
-    }
-
+    
     out
-
+    
   })
+  
+  
+  # map_bounds_poly <- reactive({
+  #   
+  #   req(input$map$bounds)
+  #   
+  #   selected_polygon$polygon %>% 
+  #     sf::st_bbox(crs = 4326)
+  #   
+  # }) |> debounce(300)
   
   # Create web map and add basic elements and functionality
   output$main_map <- leaflet::renderLeaflet({
-
+    
     m <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE)) %>% # Open new leaflet web map
       leaflet::fitBounds(lng1 = -124.482, lat1 = 32.52883, lng2 = -114.1312, lat2 = 42.0095) %>% 
       leaflet::addMapPane("basemap1", zIndex = -100) %>% # Add basemap 1
@@ -175,16 +194,28 @@ function(input, output, session) {
                                   updateWhenIdle = TRUE           # map won't load new tiles when panning
                                 )) %>%
       leaflet::addMapPane("basemap2", zIndex = -100) %>% # Add basemap 2
-      leaflet::addProviderTiles(providers$Esri.WorldImagery, group = "Esri World Imagery", options = list(pathOptions(pane = "basemap2"))) %>%
+      leaflet::addProviderTiles(providers$Esri.WorldImagery, group = "Esri World Imagery", options = list(pathOptions(pane = "basemap2")),
+                                providerTileOptions(
+                                  updateWhenZooming = FALSE,      # map won't update tiles until zoom is done
+                                  updateWhenIdle = TRUE           # map won't load new tiles when panning
+                                )) %>%
       leaflet::addMapPane("basemap3", zIndex = -100) %>% # Add basemap 3
-      leaflet::addProviderTiles(providers$OpenStreetMap, group = "Open Street Map", options = list(pathOptions(pane = "basemap3"))) %>%
+      leaflet::addProviderTiles(providers$OpenStreetMap, group = "Open Street Map", options = list(pathOptions(pane = "basemap3")),
+                                providerTileOptions(
+                                  updateWhenZooming = FALSE,      # map won't update tiles until zoom is done
+                                  updateWhenIdle = TRUE           # map won't load new tiles when panning
+                                )) %>%
       leaflet::addMapPane("basemap4", zIndex = -100) %>% # Add basemap 4
-      leaflet::addProviderTiles(providers$Esri.WorldStreetMap, group = "Esri World Street Map", options = list(pathOptions(pane = "basemap4"))) %>%
+      leaflet::addProviderTiles(providers$Esri.WorldStreetMap, group = "Esri World Street Map", options = list(pathOptions(pane = "basemap4")),
+                                providerTileOptions(
+                                  updateWhenZooming = FALSE,      # map won't update tiles until zoom is done
+                                  updateWhenIdle = TRUE           # map won't load new tiles when panning
+                                )) %>%
       leaflet::addScaleBar(position = "bottomleft") %>% # Add scale bar
       leaflet.extras::addResetMapButton() %>% # Add button to reset map bounds
       leaflet::addLayersControl(baseGroups = c("Esri World Street Map", "Open Street Map", "Esri World Terrain", "Esri World Imagery"), # Add layers control widget
                                 options = layersControlOptions(collapsed = TRUE), position = "topleft") %>% 
-      leafpm::addPmToolbar(toolbarOptions = leafpm::pmToolbarOptions(drawCircle = FALSE, drawMarker = FALSE, drawPolygon = FALSE, drawPolyline = FALSE, editMode = FALSE, cutPolygon = FALSE, removalMode = FALSE), # Add point/polygon drawing tools
+      leafpm::addPmToolbar(toolbarOptions = leafpm::pmToolbarOptions(drawRectangle = FALSE, drawCircle = FALSE, drawMarker = FALSE, drawPolygon = FALSE, drawPolyline = FALSE, editMode = FALSE, cutPolygon = FALSE, removalMode = FALSE), # Add point/polygon drawing tools
                            drawOptions = leafpm::pmDrawOptions(snappable = FALSE, markerStyle = list(draggable = FALSE))
       ) %>% 
       leaflet::addMapPane("preloaded_areas_of_interest", zIndex = 200) %>%
@@ -207,7 +238,7 @@ function(input, output, session) {
   
   # Set up actions following "Explore place" button press
   observeEvent(input$select_map_aoi, {
-   
+    
     shinyjs::hide("time_plot_panel")
     shinyjs::hide("data_output")
     
@@ -239,18 +270,18 @@ function(input, output, session) {
       m
       
     }
-     
+    
   })
-
+  
   # React to map click on preloaded areas of interest
   observeEvent(input$main_map_shape_click, {
-
+    
     bslib::sidebar_toggle(id = "place_sidebar", open = TRUE)
     
     selected_map_aoi <- aoi_polygons[aoi_polygons$aoi_name == input$main_map_shape_click$id, ]
     
     area_of_interest$boundary <- selected_map_aoi
-      
+    
     area_of_interest$bbox <- area_of_interest$boundary %>% 
       sf::st_bbox()
     
@@ -277,92 +308,93 @@ function(input, output, session) {
   observeEvent({
     input$get_aoi_from_url
   }, {
-
+    
     if (!is.null(input$get_aoi_from_url) & input$get_aoi_from_url != ""){
       area_of_interest$boundary <- url_place()
-    
-    area_of_interest$bbox <- area_of_interest$boundary %>% 
-      sf::st_bbox()
-    
-    m <- leafletProxy("main_map") %>%
-      clearMarkerClusters() %>%
-      clearMarkers() %>%
-      clearControls() %>% 
-      leaflet::flyToBounds(area_of_interest$bbox[[1]],
-                           area_of_interest$bbox[[2]],
-                           area_of_interest$bbox[[3]],
-                           area_of_interest$bbox[[4]], 
-                           options = list(animate = TRUE, duration = 1, easeLinearity = 0.1, noMoveStart = TRUE)
-      ) %>% 
-      leaflet::addMapPane("area_of_interest", zIndex = 200) %>%
-      leaflet::addPolygons(
-        data = area_of_interest$boundary,
-        color = grey(.2),
-        fillOpacity = 0.1,
-        fill = TRUE,
-        options = pathOptions(pane = "area_of_interest"),
-        group = "Area of Interest"
-      )
-    
-    m
-    
-  }
+      
+      area_of_interest$bbox <- area_of_interest$boundary %>% 
+        sf::st_bbox()
+      
+      m <- leafletProxy("main_map") %>%
+        clearMarkerClusters() %>%
+        clearMarkers() %>%
+        clearControls() %>% 
+        leaflet::flyToBounds(area_of_interest$bbox[[1]],
+                             area_of_interest$bbox[[2]],
+                             area_of_interest$bbox[[3]],
+                             area_of_interest$bbox[[4]], 
+                             options = list(animate = TRUE, duration = 1, easeLinearity = 0.1, noMoveStart = TRUE)
+        ) %>% 
+        leaflet::addMapPane("area_of_interest", zIndex = 200) %>%
+        leaflet::addPolygons(
+          data = area_of_interest$boundary,
+          color = grey(.2),
+          fillOpacity = 0.1,
+          fill = TRUE,
+          options = pathOptions(pane = "area_of_interest"),
+          group = "Area of Interest"
+        )
+      
+      m
+      
+    }
   })
   
   # Set up data download and analysis following "Explore place" button press
   observeEvent(input$aoi_go, {
     
     if (!is.null(area_of_interest$boundary)){
-
-    # Load cached data, if preloaded area of interest
-    # if (input$select_map_aoi %in% gsub("_data.rds", "", list.files("data/outputs"))){
-      if (input$select_map_aoi %in% gsub("_data.rds", "", aoi_available_outputs)){ 
       
-      # aoi <- readRDS(paste0("data/outputs/", input$select_map_aoi, "_data.rds"))
-      
-      aoi <- read_github_rds(
+      # Load cached data, if preloaded area of interest
+      # if (input$select_map_aoi %in% gsub("_data_full.rds", "", list.files("data/outputs"))){
+      if (input$select_map_aoi %in% gsub("_data_full.rds", "", aoi_available_outputs)){ 
+        
+        # aoi <- readRDS(paste0("data/outputs/", input$select_map_aoi, "_data_full.rds"))
+        
+        aoi <- read_github_rds(
           owner = "elimia-analytics",
           repo  = "california-biodiversity-trends-engine",
           path  = "data/outputs",
-          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data.rds"))
+          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data_full.rds"))
         )
+        
+        area_of_interest$boundary <- aoi$boundary
+        area_of_interest$baseline <- aoi$baseline
+        area_of_interest$bbox <- aoi$bbox
+        area_of_interest$baseline_bbox <-  aoi$baseline_bbox
+        area_of_interest$area <- aoi$area
+        area_of_interest$hexes <- aoi$hexes
+        area_of_interest$gbif_data <- aoi$gbif_data_display
+        area_of_interest$gbif_data_filtered <- aoi$gbif_data_display
+        area_of_interest$records_table <- aoi$records_table
+        area_of_interest$species_table <- aoi$species_table
+        area_of_interest$observers_table <- aoi$observers_table
+        area_of_interest$visits_table <- aoi$visits_table
+        area_of_interest$completeness_table <- aoi$completeness_table
+        area_of_interest$species_whr_relationships <- aoi$species_whr_relationships
+        # area_of_interest$trends_table <- aoi$trends_table
+        # area_of_interest$species_trends_list <- aoi$species_trends_list
+        # area_of_interest$biggest_movers_table <- aoi$biggest_movers_table
+        # area_of_interest$focal_species_trends_table <- aoi$focal_species_trends_table
+        
+      } else { 
+        
+        # Set up correct AOI workflow
+        # area_of_interest <- 
+        
+      }
       
-      area_of_interest$boundary <- aoi$boundary
-      area_of_interest$baseline <- aoi$baseline
-      area_of_interest$bbox <- aoi$bbox
-      area_of_interest$baseline_bbox <-  aoi$baseline_bbox
-      area_of_interest$area <- aoi$area
-      area_of_interest$hexes <- aoi$hexes
-      area_of_interest$gbif_data <- aoi$gbif_data
-      area_of_interest$gbif_data_filtered <- aoi$gbif_data
-      area_of_interest$records_table <- aoi$records_table
-      area_of_interest$species_table <- aoi$species_table
-      area_of_interest$observers_table <- aoi$observers_table
-      area_of_interest$visits_table <- aoi$visits_table
-      area_of_interest$completeness_table <- aoi$completeness_table
-      # area_of_interest$trends_table <- aoi$trends_table
-      # area_of_interest$species_trends_list <- aoi$species_trends_list
-      # area_of_interest$biggest_movers_table <- aoi$biggest_movers_table
-      # area_of_interest$focal_species_trends_table <- aoi$focal_species_trends_table
-
-    } else { 
+      updateSelectizeInput(inputId = "select_species", session = session,
+                           choices = area_of_interest$gbif_data_filtered %>%
+                             dplyr::pull(species) %>%
+                             as.character() %>%
+                             unique() %>%
+                             sort(),
+                           server = TRUE)
       
-    # Set up correct AOI workflow
-    # area_of_interest <- 
+      shinyjs::show("time_plot_panel")
+      shinyjs::show("data_output")
       
-    }
-      
-    updateSelectizeInput(inputId = "select_species", session = session,
-                         choices = area_of_interest$gbif_data_filtered %>%
-                           dplyr::pull(species) %>%
-                           as.character() %>%
-                           unique() %>%
-                           sort(),
-                         server = TRUE)
-    
-    shinyjs::show("time_plot_panel")
-    shinyjs::show("data_output")
-    
     } else {
       
       sendSweetAlert(session, type = "warning", title = "Oops!", text = "You need to select an area of interest!", closeOnClickOutside = TRUE)
@@ -374,300 +406,377 @@ function(input, output, session) {
   # Collapse sidebar before displaying downloaded data
   observe({
     if (!is.null(area_of_interest$gbif_data)){
-    bslib::sidebar_toggle(id = "place_sidebar", open = FALSE)
+      bslib::sidebar_toggle(id = "place_sidebar", open = FALSE)
     }
   }, autoDestroy = TRUE)
-
+  
   observeEvent(input$select_species, {
-
+    
     if (!is.null(input$select_species)){
       current_bounds$xmin <- current_bounds$xmin - 0.2
     } else {
       current_bounds$xmin <- current_bounds$xmin + 0.2
     }
-
+    
   }, ignoreNULL = FALSE)
+  
+  map_bounds_poly <- reactive({
+    
+    req(input$main_map_bounds) # Wait until bounds are initialized
+    
+    b <- input$main_map_bounds
+    
+    # Create bounding box matrix (xmin, ymin, xmax, ymax)
+    bbox_matrix <- matrix(
+      c(b$west, b$south, b$east, b$north), 
+      nrow = 2, 
+      byrow = TRUE,
+      dimnames = list(c("x", "y"), c("min", "max"))
+    )
+    
+    # Convert to sfc, then sf, and set CRS (usually WGS 84 / 4326)
+    bbox_poly <- st_polygon(list(rbind(c(bbox_matrix[1,1], bbox_matrix[1,2]),
+                                       c(bbox_matrix[2,1], bbox_matrix[1,2]),
+                                       c(bbox_matrix[2,1], bbox_matrix[2,2]),
+                                       c(bbox_matrix[1,1], bbox_matrix[2,2]),
+                                       c(bbox_matrix[1,1], bbox_matrix[1,2])))) %>%
+      st_sfc(crs = 4326)
+    
+  }) |> debounce(300)
   
   # Display data downloaded on DATA tab
   observe({
     
     if (!is.null(area_of_interest$gbif_data) & input$pages == "DATA"){
-    
-    zoom <- input$main_map_zoom
-    
-    # Set up h3 hex resolution corresponding to each map zoom level
-    res <- case_when(
-      zoom <= 10 ~ 5,
-      zoom <= 12 ~ 6,
-      zoom <= 13 ~ 7,
-      zoom <= 15 ~ 8,
-      TRUE ~ 9
-    )
-    
-    # Implement additional taxonomic/spatial filters on data displayed
-    area_of_interest$gbif_data_filtered <- filtered_data()
-    
-    # Observe user actions that should lead to updates to data displayed
-    if (res != current_res() | # Respond to zoom/spatial resolution changes
-        input$metric_switch != current_metric() | # Respond to metric switch
-        input$main_map_bounds$west != current_bounds$xmin | # Respond to change map bounds
-        input$main_map_bounds$south != current_bounds$ymin | # Respond to change map bounds
-        input$main_map_bounds$east != current_bounds$xmax | # Respond to change map bounds
-        input$main_map_bounds$north != current_bounds$ymax | # Respond to change map bounds
-        current_taxon() != center_taxon$name # | # Respond to taxon sunburst chart clicks 
-        # !is.null(input$select_species) 
-        ) {
-    
-      current_res(res)
-      current_metric(input$metric_switch)
-      current_bounds$xmin <- input$main_map_bounds$west
-      current_bounds$ymin <- input$main_map_bounds$south
-      current_bounds$xmax <- input$main_map_bounds$east
-      current_bounds$ymax <- input$main_map_bounds$north
-      current_taxon(center_taxon$name)
       
-      bbox_coords <- matrix(
-        c(max(c(area_of_interest$baseline_bbox[["xmin"]], input$main_map_bounds$west)),
-          max(c(area_of_interest$baseline_bbox[["ymin"]], input$main_map_bounds$south)),
-          max(c(area_of_interest$baseline_bbox[["xmax"]], input$main_map_bounds$east)),
-          max(c(area_of_interest$baseline_bbox[["ymax"]], input$main_map_bounds$north))
-          ),
-        ncol = 2, byrow = TRUE)
-
-      bbox_poly <- st_polygon(list(rbind(c(bbox_coords[1,1], bbox_coords[1,2]),
-                                         c(bbox_coords[2,1], bbox_coords[1,2]),
-                                         c(bbox_coords[2,1], bbox_coords[2,2]),
-                                         c(bbox_coords[1,1], bbox_coords[2,2]),
-                                         c(bbox_coords[1,1], bbox_coords[1,2])))) %>%
-        st_sfc(crs = 4326)
+      zoom <- input$main_map_zoom
       
-      # Identify h3 hexes corresponding to baseline area at current map resolution
-      h3_sf <- generate_h3_cells(bbox_poly, res)
+      # Set up h3 hex resolution corresponding to each map zoom level
+      res <- case_when(
+        zoom <= 10 ~ 5,
+        zoom <= 12 ~ 6,
+        zoom <= 13 ~ 7,
+        zoom <= 15 ~ 8,
+        TRUE ~ 9
+      )
       
       # Implement additional taxonomic/spatial filters on data displayed
       area_of_interest$gbif_data_filtered <- filtered_data()
       
-      # if (!is.null(input$select_species)){
-      #   center_taxon$name <- area_of_interest$gbif_data_filtered %>% 
-      #     dplyr::filter(species %in% input$select_species) %>% 
-      #     dplyr::pull(genus) %>% 
-      #     head(1)
-      #   current_species(input$select_species)
-      # } else {
-      #   # center_taxon$name <- "Life"
-      #   current_taxon(center_taxon$name)
-      # }
-      
-      # Count user-selected metric across hexes displayed
-      area_of_interest$metric_count_hexes <- get_count_summary(
-        records = area_of_interest$gbif_data_filtered %>% 
-          sf::st_set_geometry(NULL) %>% 
-          dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east),
-        base_hexes = h3_sf,
-        metric = input$metric_switch,
-        resolution = paste0("h", res)
-      )
-      
-      area_of_interest$metric_count_hexes <- area_of_interest$metric_count_hexes %>% 
-        dplyr::filter(!is.na(metric)) 
-      
-      if (sum(!is.na(area_of_interest$metric_count_hexes$metric)) > 0){
-      
-      pal <- colorNumeric(palette = "Reds", domain = area_of_interest$metric_count_hexes$metric)
+      # Observe user actions that should lead to updates to data displayed
+      if (res != current_res() | # Respond to zoom/spatial resolution changes
+          input$metric_switch != current_metric() | # Respond to metric switch
+          input$main_map_bounds$west != current_bounds$xmin | # Respond to change map bounds
+          input$main_map_bounds$south != current_bounds$ymin | # Respond to change map bounds
+          input$main_map_bounds$east != current_bounds$xmax | # Respond to change map bounds
+          input$main_map_bounds$north != current_bounds$ymax | # Respond to change map bounds
+          current_taxon() != center_taxon$name # | # Respond to taxon sunburst chart clicks 
+          # !is.null(input$select_species) 
+      ) {
         
-      m <- leafletProxy("main_map") %>%
-        clearControls() %>% 
-        clearGroup("h3") %>%
-        clearGroup("Records") %>% 
-        addPolygons(data = area_of_interest$metric_count_hexes,
-                    fillColor = ~pal(area_of_interest$metric_count_hexes$metric),
-                    fillOpacity = 0.8,
-                    color = "transparent",
-                    opacity = 0,
-                    group = "h3") 
-
-      
-      if (input$metric_switch == "Locations"){
-        m <- m %>%
-          addLegend(
-            position = "topleft",
-            pal = pal,
-            bins = 2,
-            values = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)), 
-            labels = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)),
-            title = paste0("Species Inventory Completeness (%)")
-          )
-      } else {
-        m <- m %>%
-          addLegend(
-            position = "topleft",
-            pal = pal, 
-            bins = 3,
-            values = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)), 
-            labels = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)),
-            title = paste0("Number of ", input$metric_switch)
-          )
-       }
-      } else {
+        current_res(res)
+        current_metric(input$metric_switch)
+        current_bounds$xmin <- input$main_map_bounds$west
+        current_bounds$ymin <- input$main_map_bounds$south
+        current_bounds$xmax <- input$main_map_bounds$east
+        current_bounds$ymax <- input$main_map_bounds$north
+        current_taxon(center_taxon$name)
         
-        m <- leafletProxy("main_map") %>%
-          clearMarkerClusters() %>%
-          clearControls() %>% 
-          clearMarkers() %>%  
-          clearGroup("h3") %>% 
-          clearGroup("Records")
+        bbox_coords <- matrix(
+          c(max(c(area_of_interest$baseline_bbox[["xmin"]], input$main_map_bounds$west)),
+            max(c(area_of_interest$baseline_bbox[["ymin"]], input$main_map_bounds$south)),
+            max(c(area_of_interest$baseline_bbox[["xmax"]], input$main_map_bounds$east)),
+            max(c(area_of_interest$baseline_bbox[["ymax"]], input$main_map_bounds$north))
+          ),
+          ncol = 2, byrow = TRUE)
         
-      }
-
-      m
-
-    }
-
-    # Map actual occurrences above a certain zoom level
-    if (input$main_map_zoom > 15) {
-      
-      map_occ <- area_of_interest$gbif_data_filtered %>%
-        dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east) %>%
-        dplyr::mutate(
-          gbifid = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", gbifid, "</a>"),
-          URL = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", paste0("https://www.gbif.org/occurrence/", gbifid), "</a>"),
-          point_color = case_when( # Color occurrences to reflect runburst chart colors
-            kingdom == "Animalia" ~ "#FF7F0F90", 
-            kingdom == "Plantae" ~ "#2CA02C90",
-            kingdom == "Fungi" ~ "#D6272890",
-            kingdom == "Chromista" ~ "#1F77B490",
-            .default = "#66666680"
-          )
-          )
-      
-      if (nrow(map_occ) > 0){
+        bbox_poly <- st_polygon(list(rbind(c(bbox_coords[1,1], bbox_coords[1,2]),
+                                           c(bbox_coords[2,1], bbox_coords[1,2]),
+                                           c(bbox_coords[2,1], bbox_coords[2,2]),
+                                           c(bbox_coords[1,1], bbox_coords[2,2]),
+                                           c(bbox_coords[1,1], bbox_coords[1,2])))) %>%
+          st_sfc(crs = 4326)
         
-        # Add occurrences to map
-        m <- leafletProxy("main_map") %>%
-          # clearShapes() %>%
-          clearControls() %>%
-          clearGroup("Records") %>% 
-          clearGroup("h3") %>%
-          leaflet::addMapPane("records", zIndex = 400) %>%
-        addGlPoints(
-          data = map_occ, 
-          layerId = "gbifid", 
-          popup = TRUE,
-          fillColor = map_occ$point_color,
-          fillOpacity = 0.85, 
-          group = "Records", 
-          pane = "records",
-          radius = 20
+        # Identify h3 hexes corresponding to baseline area at current map resolution
+        h3_sf <- generate_h3_cells(bbox_poly, res)
+        
+        # Implement additional taxonomic/spatial filters on data displayed
+        area_of_interest$gbif_data_filtered <- filtered_data()
+        
+        # if (!is.null(input$select_species)){
+        #   center_taxon$name <- area_of_interest$gbif_data_filtered %>% 
+        #     dplyr::filter(species %in% input$select_species) %>% 
+        #     dplyr::pull(genus) %>% 
+        #     head(1)
+        #   current_species(input$select_species)
+        # } else {
+        #   # center_taxon$name <- "Life"
+        #   current_taxon(center_taxon$name)
+        # }
+        
+        # req(input$records_table)
+        # print(input$records_table_rows_selected)
+        
+        # if (!is.null(input$records_table_rows_selected)){
+        #   # Count user-selected metric across hexes displayed
+        #   area_of_interest$metric_count_hexes <- get_count_summary(
+        #     records = area_of_interest$points_selected %>% 
+        #       sf::st_set_geometry(NULL) ,
+        #     base_hexes = h3_sf,
+        #     metric = input$metric_switch,
+        #     resolution = paste0("h", res)
+        #   )
+        # } else {
+        # Count user-selected metric across hexes displayed
+        area_of_interest$metric_count_hexes <- get_count_summary(
+          records = area_of_interest$gbif_data_filtered %>% 
+            sf::st_set_geometry(NULL) %>% 
+            dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east),
+          base_hexes = h3_sf,
+          metric = input$metric_switch,
+          resolution = paste0("h", res)
         )
+        # }
+        
+        area_of_interest$metric_count_hexes <- area_of_interest$metric_count_hexes %>% 
+          dplyr::filter(!is.na(metric)) 
+        
+        if (sum(!is.na(area_of_interest$metric_count_hexes$metric)) > 0){
+          
+          pal <- colorNumeric(palette = "Reds", domain = area_of_interest$metric_count_hexes$metric)
+          
+          m <- leafletProxy("main_map") %>%
+            clearControls() %>% 
+            clearGroup("h3") %>%
+            clearGroup("Records") %>% 
+            addPolygons(data = area_of_interest$metric_count_hexes,
+                        fillColor = ~pal(area_of_interest$metric_count_hexes$metric),
+                        fillOpacity = 0.8,
+                        color = "transparent",
+                        opacity = 0,
+                        group = "h3") 
+          
+          
+          if (input$metric_switch == "Locations"){
+            m <- m %>%
+              addLegend(
+                position = "topleft",
+                pal = pal,
+                bins = 2,
+                values = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)), 
+                labels = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)),
+                title = paste0("Species Inventory Completeness (%)")
+              )
+          } else {
+            m <- m %>%
+              addLegend(
+                position = "topleft",
+                pal = pal, 
+                bins = 3,
+                values = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)), 
+                labels = c(min(area_of_interest$metric_count_hexes$metric, na.rm = TRUE), max(area_of_interest$metric_count_hexes$metric, na.rm = TRUE)),
+                title = paste0("Number of ", input$metric_switch)
+              )
+          }
+        } else {
+          
+          m <- leafletProxy("main_map") %>%
+            clearMarkerClusters() %>%
+            clearControls() %>% 
+            clearMarkers() %>%  
+            clearGroup("h3") %>% 
+            clearGroup("Records")
+          
+        }
+        
       }
-    }
+      
+      # Map actual occurrences above a certain zoom level
+      if (input$main_map_zoom > 15) {
+        
+        main_map_bounds <- input$main_map_bounds
+        
+        map_occ <- area_of_interest$gbif_data_filtered %>%
+          dplyr::filter(decimallatitude >= main_map_bounds$south & decimallatitude <= main_map_bounds$north & decimallongitude >= main_map_bounds$west & decimallongitude <= main_map_bounds$east) %>%
+          dplyr::mutate(
+            gbifid = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", gbifid, "</a>"),
+            URL = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", paste0("https://www.gbif.org/occurrence/", gbifid), "</a>"),
+            point_color = case_when( # Color occurrences to reflect runburst chart colors
+              kingdom == "Animalia" ~ "#FF7F0F90", 
+              kingdom == "Plantae" ~ "#2CA02C90",
+              kingdom == "Fungi" ~ "#D6272890",
+              kingdom == "Chromista" ~ "#1F77B490",
+              .default = "#66666680"
+            )
+          )
+        
+        if (nrow(map_occ) > 0){
+          
+          # Add occurrences to map
+          m <- leafletProxy("main_map") %>%
+            # clearShapes() %>%
+            clearControls() %>%
+            clearGroup("Records") %>% 
+            clearGroup("h3") %>%
+            leaflet::addMapPane("records", zIndex = 400) %>%
+            addGlPoints(
+              data = map_occ, 
+              layerId = "gbifid", 
+              popup = TRUE,
+              fillColor = map_occ$point_color,
+              fillOpacity = 0.85, 
+              group = "Records", 
+              pane = "records",
+              radius = 20
+            )
+        }
+        
+        # req(input$metric_switch == "Habitats")
+        # req(input$records_table_rows_selected)
+        # 
+        # target_hab <- area_of_interest$metric_table[input$records_table_rows_selected, ]$habitat
+        # 
+        # raw <- safe_arcgis_raster(
+        #   service_url = "https://egis.fire.ca.gov/arcgis/rest/services/FRAP/fveg_WHRTYPE/MapServer",
+        #   bbox = map_bounds_poly(), 
+        #   extra_filters = paste0("where=WHRNAME%20%3D%20'", target_hab, "'"),
+        #   out_crs = 3857,
+        #   resolution = 30,
+        #   format = "png"
+        # )
+        
+        # if (!is.null(raw)){
+        # 
+        #   m <- leafletProxy("main_map") %>%
+        #     leaflet::clearGroup("CWHR") %>%
+        #     leaflet::addMapPane("CWHR", zIndex = 350) |>
+        #     leaflet::addRasterImage(
+        #       x = raw,
+        #       opacity = 0.6,
+        #       group = "CWHR",
+        #       options = pathOptions(pane = "CWHR"),
+        #       project = FALSE
+        #     )
+        # 
+        # }
+        
+        m
+        
+      }
+      
     }
     
   })
   
   # React to user selections from DATA table
   observeEvent(input$records_table_rows_selected, {
-
-  if (!is.null(input$records_table_rows_selected)){
     
-    if (length(input$records_table_rows_selected) < nrow(area_of_interest$metric_table)){
+    if (!is.null(input$records_table_rows_selected)){
       
-      updateCheckboxInput(session = session, "select_all", value = FALSE)
+      if (length(input$records_table_rows_selected) < nrow(area_of_interest$metric_table)){
+        
+        updateCheckboxInput(session = session, "select_all", value = FALSE)
+        
+      } else {
+        
+        updateCheckboxInput(session = session, "select_all", value = TRUE)
+        
+      }
       
-    } else {
-      
-      updateCheckboxInput(session = session, "select_all", value = TRUE)
-      
-    }
-    
-    if (input$metric_switch != "Locations"){
-      
-    # If metric is Records, highlight selected occurrences
-    if (input$metric_switch == "Records"){
-      target_records <- gsub("<a href='https://www.gbif.org/occurrence/", "", purrr::map(strsplit(area_of_interest$metric_table[input$records_table_rows_selected, ]$URL, "' target"), 1))
-      area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
-        dplyr::filter(gbifid %in% target_records)
-      # area_of_interest$points_selected <- area_of_interest$metric_table[input$records_table_rows_selected, ]
-    }
-    
-    # If metric is Species, highlight all occurrences for the species selected
-    if (input$metric_switch == "Species"){
-      target_sp <- area_of_interest$metric_table[input$records_table_rows_selected, ]$`scientific name`
-      area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
-        dplyr::filter(species %in% target_sp)
-    } 
-      
-    # If metric is Observers, highlight all occurrences for the observer selected
-    if (input$metric_switch == "Observers"){
-      target_obs <- area_of_interest$metric_table[input$records_table_rows_selected, ]$`observer name`
-      area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
-        dplyr::filter(recordedby %in% target_obs)
-    }
-      
-    # If metric is Visits, highlight all occurrences for the visit selected
-    if (input$metric_switch == "Visits"){
-      target_vis <- area_of_interest$metric_table[input$records_table_rows_selected, ]$visitID
-      area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
-        dplyr::filter(visitID %in% target_vis)
-    } 
-
-    area_of_interest$points_selected <- area_of_interest$points_selected %>%
-        dplyr::mutate(
-          gbifid = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", gbifid, "</a>"),
-          URL = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", paste0("https://www.gbif.org/occurrence/", gbifid), "</a>")
-        ) %>%
-        dplyr::arrange(desc(eventdate), species)
-      
-    m <- leafletProxy("main_map") %>%
-      clearGroup("Selected") %>%
-      leaflet::addMapPane("records_selected", zIndex = 2000) %>%
-      addMarkers(
-        data = area_of_interest$points_selected,
-        lng = ~decimallongitude, 
-        lat = ~decimallatitude, 
-        layerId = ~gbifid,
-        options = pathOptions(pane = "records_selected"),
-        group = "Selected",
-        popup = leafpop::popupTable(area_of_interest$points_selected %>%
-                                      st_set_geometry(NULL) %>%
-                                      dplyr::mutate(
-                                        URL = paste0("<a href='", URL, "' target='_blank' onmousedown='event.stopPropagation();'>", URL, "</a>")
-                                      ), row.numbers = FALSE, feature.id = FALSE),
-        popupOptions = popupOptions(maxWidth = 300, autoPan = FALSE, keepInView = TRUE)
-      )
-
-    m
-
-    } else {
-      
-      selected_poly <- h3jsr::cell_to_polygon(input = as.character(area_of_interest$metric_table$hexagon[input$records_table_rows_selected])) %>% 
-        sf::st_transform(4326)
-          
-      m <- leafletProxy("main_map") %>%
-        clearGroup("Selected") %>%
-        leaflet::addMapPane("hex_selected", zIndex = 2000) %>%
-        addPolygons(data = selected_poly, 
+      if (input$metric_switch != "Locations"){
+        
+        # If metric is Records, highlight selected occurrences
+        if (input$metric_switch == "Records"){
+          target_records <- gsub("<a href='https://www.gbif.org/occurrence/", "", purrr::map(strsplit(area_of_interest$metric_table[input$records_table_rows_selected, ]$URL, "' target"), 1))
+          area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
+            dplyr::filter(gbifid %in% target_records)
+          # area_of_interest$points_selected <- area_of_interest$metric_table[input$records_table_rows_selected, ]
+        }
+        
+        # If metric is Species, highlight all occurrences for the species selected
+        if (input$metric_switch == "Species"){
+          target_sp <- area_of_interest$metric_table[input$records_table_rows_selected, ]$`scientific name`
+          area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
+            dplyr::filter(species %in% target_sp)
+        } 
+        
+        # If metric is Habitats, highlight all occurrences for the habitat selected
+        if (input$metric_switch == "Habitats"){
+          target_hab <- area_of_interest$metric_table[input$records_table_rows_selected, ]$habitat
+          area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
+            dplyr::filter(habitat %in% target_hab)
+        } 
+        
+        # If metric is Observers, highlight all occurrences for the observer selected
+        if (input$metric_switch == "Observers"){
+          target_obs <- area_of_interest$metric_table[input$records_table_rows_selected, ]$`observer name`
+          area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
+            dplyr::filter(recordedby %in% target_obs)
+        }
+        
+        # If metric is Visits, highlight all occurrences for the visit selected
+        if (input$metric_switch == "Visits"){
+          target_vis <- area_of_interest$metric_table[input$records_table_rows_selected, ]$visitID
+          area_of_interest$points_selected <- area_of_interest$gbif_data_filtered %>% 
+            dplyr::filter(visitID %in% target_vis)
+        } 
+        
+        area_of_interest$points_selected <- area_of_interest$points_selected %>%
+          dplyr::mutate(
+            gbifid = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", gbifid, "</a>"),
+            URL = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", paste0("https://www.gbif.org/occurrence/", gbifid), "</a>")
+          ) %>%
+          dplyr::arrange(desc(eventdate), species)
+        
+        m <- leafletProxy("main_map") %>%
+          clearGroup("Selected") %>%
+          leaflet::addMapPane("records_selected", zIndex = 2000) %>%
+          addMarkers(
+            data = area_of_interest$points_selected,
+            lng = ~decimallongitude, 
+            lat = ~decimallatitude, 
+            layerId = ~gbifid,
+            options = pathOptions(pane = "records_selected"),
+            group = "Selected",
+            popup = leafpop::popupTable(area_of_interest$points_selected[, -c(which(names(area_of_interest$points_selected) == "h0"): ncol(area_of_interest$points_selected))] %>%
+                                          st_set_geometry(NULL)
+                                        , row.numbers = FALSE, feature.id = FALSE),
+            popupOptions = popupOptions(maxWidth = 300, autoPan = FALSE, keepInView = TRUE),
+            clusterOptions = markerClusterOptions() # Enables clustering
+          )
+        
+        m
+        
+      } else {
+        
+        selected_poly <- h3jsr::cell_to_polygon(input = as.character(area_of_interest$metric_table$hexagon[input$records_table_rows_selected])) %>% 
+          sf::st_transform(4326)
+        
+        m <- leafletProxy("main_map") %>%
+          clearGroup("Selected") %>%
+          leaflet::addMapPane("hex_selected", zIndex = 2000) %>%
+          addPolygons(data = selected_poly, 
                       color = "#111111", 
                       fillOpacity = 0,
                       popup = "metric", 
                       # pane = "hex_selected",
                       group = "Selected") 
+        
+        m
+        
+      }
       
-      m
+    } else {
+      
+      m <- leafletProxy("main_map") %>%
+        clearGroup("Selected")
+      
+      area_of_interest$points_selected <- area_of_interest$gbif_data[1, ][-1, ]
       
     }
     
-  } else {
-
-    m <- leafletProxy("main_map") %>%
-      clearGroup("Selected")
-
-    area_of_interest$points_selected <- area_of_interest$gbif_data[1, ][-1, ]
-
-  }
-
-}, ignoreNULL = FALSE)
-
+  }, ignoreNULL = FALSE)
+  
   
   observeEvent(input$select_all, {
     
@@ -686,70 +795,88 @@ function(input, output, session) {
     }
     
   })
- 
+  
   output$time_plot <- dygraphs::renderDygraph({
-
+    
     if (!is.null(area_of_interest$gbif_data_filtered)){
-
+      
       if (isTRUE(input$redo_search)){
         dat <- area_of_interest$gbif_data_filtered %>%
           dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east)
       } else {
         dat <- area_of_interest$gbif_data_filtered
       }
-
+      
       if (input$metric_switch == "Records"){
-        dat <- dat %>%
+        plot_dat <- dat %>%
           sf::st_set_geometry(NULL) %>%
           dplyr::filter(complete.cases(year)) %>%
           dplyr::group_by(year) %>%
           dplyr::summarise(number_records = n()) %>%
           dplyr::ungroup() %>%
           dplyr::mutate(year = paste0(year, "-01-01") %>% as.Date())
-
-        dat <- xts::xts(x = dat$number_records, order.by = dat$year)
-
+        
+        plot_dat <- xts::xts(x = plot_dat$number_records, order.by = plot_dat$year)
+        
       }
-
+      
       if (input$metric_switch == "Species"){
-        dat <- dat %>%
+        plot_dat <- dat %>%
           sf::st_set_geometry(NULL) %>%
           dplyr::filter(complete.cases(year)) %>%
           dplyr::group_by(year) %>%
           dplyr::summarise(number_species = n_distinct(species)) %>%
           dplyr::ungroup() %>%
           dplyr::mutate(year = paste0(year, "-01-01") %>% as.Date())
-
-        dat <- xts::xts(x = dat$number_species, order.by = dat$year)
-
+        
+        plot_dat <- xts::xts(x = plot_dat$number_species, order.by = plot_dat$year)
+        
       }
-
+      
+      if (input$metric_switch == "Habitats"){
+        
+        assign("dat", dat, pos = 1)
+        
+        plot_dat <- dat %>%
+          sf::st_set_geometry(NULL) %>%
+          dplyr::filter(complete.cases(year)) %>%
+          dplyr::group_by(year) %>%
+          dplyr::summarise(number_habitats = n_distinct(habitat)) %>%
+          dplyr::ungroup() %>%
+          dplyr::mutate(year = paste0(year, "-01-01") %>% as.Date())
+        
+        assign("plot_dat", plot_dat, pos = 1)
+        
+        plot_dat <- xts::xts(x = plot_dat$number_habitats, order.by = plot_dat$year)
+        
+      }
+      
       if (input$metric_switch == "Observers"){
-        dat <- dat %>%
+        plot_dat <- dat %>%
           sf::st_set_geometry(NULL) %>%
           dplyr::filter(complete.cases(year)) %>%
           dplyr::group_by(year) %>%
           dplyr::summarise(number_observers = n_distinct(recordedby)) %>%
           dplyr::ungroup() %>%
           dplyr::mutate(year = paste0(year, "-01-01") %>% as.Date())
-
-        dat <- xts::xts(x = dat$number_observers, order.by = dat$year)
+        
+        plot_dat <- xts::xts(x = plot_dat$number_observers, order.by = plot_dat$year)
       }
-
+      
       if (input$metric_switch == "Visits"){
-        dat <- dat %>%
+        plot_dat <- dat %>%
           sf::st_set_geometry(NULL) %>%
           dplyr::filter(complete.cases(year)) %>%
           dplyr::group_by(year) %>%
           dplyr::summarise(number_visits = n_distinct(visitID)) %>%
           dplyr::ungroup() %>%
           dplyr::mutate(year = paste0(year, "-01-01") %>% as.Date())
-
-        dat <- xts::xts(x = dat$number_visits, order.by = dat$year)
+        
+        plot_dat <- xts::xts(x = plot_dat$number_visits, order.by = plot_dat$year)
       }
       
       if (input$metric_switch == "Locations"){
-        dat <- dat %>%
+        plot_dat <- dat %>%
           sf::st_set_geometry(NULL) %>%
           dplyr::filter(complete.cases(year)) %>%
           dplyr::group_by(species) %>%
@@ -760,16 +887,16 @@ function(input, output, session) {
           dplyr::ungroup() %>%
           dplyr::mutate(first_year = paste0(first_year, "-01-01") %>% as.Date())
         
-        dat <- xts::xts(x = 100*(dat$cumulative_species/max(dat$cumulative_species, na.rm = TRUE)), order.by = dat$first_year)
+        plot_dat <- xts::xts(x = 100*(plot_dat$cumulative_species/max(plot_dat$cumulative_species, na.rm = TRUE)), order.by = plot_dat$first_year)
       }
-
+      
       if (input$metric_switch == "Locations"){
         plot_lab <- paste0("Species Accumulation (%)")
       } else {
         plot_lab <- paste0("Number of ", input$metric_switch)
       }
       
-      dygraph(dat, ylab = "") %>%
+      dygraph(plot_dat, ylab = "") %>%
         dyBarChart() %>%
         dySeries("V1", label = plot_lab, color = "#83353C") %>%
         dyAxis(
@@ -782,11 +909,11 @@ function(input, output, session) {
         ) %>%
         dygraphs::dyRangeSelector() %>%
         dyOptions(drawGrid = FALSE)
-
+      
     }
     
   })
-
+  
   output$taxa_donut <- plotly::renderPlotly({
     
     if (!is.null(area_of_interest$gbif_data_filtered)){
@@ -892,19 +1019,19 @@ function(input, output, session) {
       
     }
   })
-
-
+  
+  
   observeEvent(event_data(event = "plotly_sunburstclick",
                           source = "taxa_plot",
                           priority = "event"), {
-
+                            
                             if (isTRUE(input$redo_search)){
                               dat <- area_of_interest$gbif_data_filtered %>%
                                 dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east)
                             } else {
                               dat <- area_of_interest$gbif_data_filtered
                             }
-
+                            
                             dat <- dat %>%
                               sf::st_set_geometry(NULL) %>%
                               dplyr::mutate(
@@ -914,19 +1041,19 @@ function(input, output, session) {
                             clicked_taxa$taxon <- c(clicked_taxa$taxon, clickData()[["customdata"]])
                             
                             if (!identical(clicked_taxa$taxon[length(clicked_taxa$taxon)], "Life")){
-
+                              
                               if (length(clicked_taxa$taxon) == 1){
-
+                                
                                 center_taxon$name <- clickData()[["customdata"]]
                               }
                               if (length(clicked_taxa$taxon) > 1){
-
+                                
                                 if (identical(unique(clicked_taxa$taxon), "Life")){
-
+                                  
                                   center_taxon$name <- "Life"
-
+                                  
                                 } else {
-
+                                  
                                   last <- clicked_taxa$taxon[length(clicked_taxa$taxon)]
                                   last_taxon_path <- dat$classification_path[grep(last, dat$classification_path)[1]]
                                   last_taxon_path_names <- (last_taxon_path %>% strsplit("\\|"))[[1]]
@@ -938,26 +1065,28 @@ function(input, output, session) {
                                   
                                   if (last != beforelast){
                                     if (sum(grepl(last, last_taxon_path_names)) > 0){
-                                    if (grep(last, last_taxon_path_names) > grep(beforelast, last_taxon_path_names)){
-                                      center_taxon$name <- last
-                                    } else {
-                                      center_taxon$name <- last_taxon_path_names[grep(last, last_taxon_path_names)-1]
-                                      clicked_taxa$taxon[(length(clicked_taxa$taxon))] <- center_taxon$name
-                                    }
+                                      if (grep(last, last_taxon_path_names) > grep(beforelast, last_taxon_path_names)){
+                                        center_taxon$name <- last
+                                      } else {
+                                        center_taxon$name <- last_taxon_path_names[grep(last, last_taxon_path_names)-1]
+                                        clicked_taxa$taxon[(length(clicked_taxa$taxon))] <- center_taxon$name
+                                      }
                                     }
                                   } else if (last == beforelast){
                                     center_taxon$name <- last_taxon_path_names[grep(last, last_taxon_path_names)-1]
                                     clicked_taxa$taxon[(length(clicked_taxa$taxon))] <- center_taxon$name
                                   }
-                                
+                                  
                                 }
                               }
-
+                              
                             }
-
+                            
                           })
-
-  output$records_table <- DT::renderDataTable({
+  
+  records_table_data <- reactive({
+    
+    req(area_of_interest$gbif_data_filtered)
     
     if (is.null(area_of_interest$records_table)){
       
@@ -968,122 +1097,119 @@ function(input, output, session) {
         dat <- area_of_interest$gbif_data_filtered
       }
       
-    if (input$metric_switch == "Records"){
+      if (input$metric_switch == "Records"){
+        
+        dat <- dat %>% 
+          dplyr::arrange(desc(eventdate), species) 
+        
+        dat <- dat %>%
+          sf::st_set_geometry(NULL) %>%
+          dplyr::mutate(decimallongitude = round(decimallongitude, 3), decimallatitude = round(decimallatitude, 3),
+                        URL = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", gbifid, "</a>"),
+                        eventdate = substr(eventdate, 1, 10) %>% as.character()
+          ) %>%
+          dplyr::select(species, obscure_from_map, eventdate, habitat, URL, basisofrecord, institutioncode, decimallongitude, decimallatitude, coordinateuncertaintyinmeters, kingdom, phylum, class, order, family, genus) %>%
+          dplyr::rename("scientific name" = species,
+                        "sensitive record" = obscure_from_map,
+                        "date" = eventdate,
+                        "record type" = basisofrecord,
+                        "longitude" = decimallongitude,
+                        "latitude" = decimallatitude,
+                        "uncertainty (m)" = coordinateuncertaintyinmeters,
+                        "institution code" = institutioncode
+          )
+        area_of_interest$metric_table <- dat
+        area_of_interest$records_table <- dat
+        
+      }
       
-      # if (!is.null(input$select_species)){
-      #   dat <- dat %>% 
-      #     dplyr::filter(species %in% input$select_species)
-      # }
+      if (input$metric_switch == "Species"){
+        
+        dat <- dat %>% 
+          dplyr::group_by(species, kingdom, phylum, class, order, family, genus) %>%
+          dplyr::summarise(number_records = n(),
+                           number_years_recorded = n_distinct(year)
+          ) %>% 
+          dplyr::arrange(desc(number_records))
+        
+        dat <- dat %>%
+          sf::st_set_geometry(NULL) %>%
+          dplyr::select(species, number_records, number_years_recorded, kingdom, phylum, class, order, family, genus) %>%
+          dplyr::rename("scientific name" = species,
+                        "number records" = number_records,
+                        "number years recorded" = number_years_recorded
+          ) 
+        
+        area_of_interest$metric_table <- dat
+        area_of_interest$species_table <- dat
+        
+      }
       
-    dat <- dat %>% 
-      dplyr::arrange(desc(eventdate), species) 
-    
-    dat <- dat %>%
-      sf::st_set_geometry(NULL) %>%
-      dplyr::mutate(decimallongitude = round(decimallongitude, 3), decimallatitude = round(decimallatitude, 3),
-                    URL = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", gbifid, "</a>")
-      ) %>%
-      dplyr::select(species, eventdate, URL, basisofrecord, institutioncode, decimallongitude, decimallatitude, coordinateuncertaintyinmeters, kingdom, phylum, class, order, family, genus) %>%
-      dplyr::rename("scientific name" = species,
-                    "date" = eventdate,
-                    "record type" = basisofrecord,
-                    "longitude" = decimallongitude,
-                    "latitude" = decimallatitude,
-                    "uncertainty (m)" = coordinateuncertaintyinmeters,
-                    "institution code" = institutioncode
-      )
-    area_of_interest$metric_table <- dat
-    area_of_interest$records_table <- dat
-    
-    }
-    
-    if (input$metric_switch == "Species"){
-
-      dat <- dat %>% 
-        dplyr::group_by(species, kingdom, phylum, class, order, family, genus) %>%
-        dplyr::summarise(number_records = n(),
-                         number_years_recorded = n_distinct(year)
-        ) %>% 
-        dplyr::arrange(desc(number_records))
+      if (input$metric_switch == "Observers"){
+        
+        dat <- dat %>% 
+          dplyr::group_by(recordedby) %>%
+          dplyr::summarise(number_records = n(),
+                           number_species_recorded = n_distinct(species),
+                           proportion_species_recorded = n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species),
+                           number_years_recorded = n_distinct(year)
+          ) %>% 
+          dplyr::arrange(desc(number_records)) 
+        
+        dat <- dat %>%
+          sf::st_set_geometry(NULL) %>%
+          dplyr::select(recordedby, number_records, number_species_recorded, proportion_species_recorded, number_years_recorded) %>%
+          dplyr::rename("observer name" = recordedby,
+                        "number records" = number_records,
+                        "number species recorded" = number_species_recorded,
+                        "proportion species recorded" = proportion_species_recorded,
+                        "number years recorded" = number_years_recorded
+          )
+        
+        area_of_interest$metric_table <- dat
+        area_of_interest$observers_table <- dat
+        
+      }
       
-      dat <- dat %>%
-        sf::st_set_geometry(NULL) %>%
-        dplyr::select(species, number_records, number_years_recorded, kingdom, phylum, class, order, family, genus) %>%
-        dplyr::rename("scientific name" = species,
-                      "number records" = number_records,
-                      "number years recorded" = number_years_recorded
-        ) 
-      
-      area_of_interest$metric_table <- dat
-      area_of_interest$species_table <- dat
-      
-    }
-    
-    if (input$metric_switch == "Observers"){
-
-      dat <- dat %>% 
-        dplyr::group_by(recordedby) %>%
-        dplyr::summarise(number_records = n(),
-                         number_species_recorded = n_distinct(species),
-                         proportion_species_recorded = n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species),
-                         number_years_recorded = n_distinct(year)
-        ) %>% 
-        dplyr::arrange(desc(number_records)) 
-      
-      dat <- dat %>%
-        sf::st_set_geometry(NULL) %>%
-        dplyr::select(recordedby, number_records, number_species_recorded, proportion_species_recorded, number_years_recorded) %>%
-        dplyr::rename("observer name" = recordedby,
-                      "number records" = number_records,
-                      "number species recorded" = number_species_recorded,
-                      "proportion species recorded" = proportion_species_recorded,
-                      "number years recorded" = number_years_recorded
-        )
-      
-      area_of_interest$metric_table <- dat
-      area_of_interest$observers_table <- dat
-      
-    }
-    
-    if (input$metric_switch == "Visits"){
-
-      dat <- dat %>% 
-        dplyr::group_by(visitID, recordedby, eventdate) %>%
-        dplyr::summarise(number_records = n(),
-                         number_species_recorded = n_distinct(species),
-                         proportion_species_recorded = n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species)
-        ) %>% 
-        dplyr::arrange(desc(number_records))
-      
-      dat <- dat %>%
-        sf::st_set_geometry(NULL) %>%
-        dplyr::select(visitID, recordedby, eventdate, number_records, number_species_recorded, proportion_species_recorded) %>%
-        dplyr::rename("observer name" = recordedby,
-                      "date" = eventdate,
-                      "number records" = number_records,
-                      "number species recorded" = number_species_recorded,
-                      "proportion species recorded" = proportion_species_recorded
-        )
-      
-      area_of_interest$metric_table <- dat
-      area_of_interest$visits_table <- dat
-
-    }
+      if (input$metric_switch == "Visits"){
+        
+        dat <- dat %>% 
+          dplyr::group_by(visitID, recordedby, eventdate) %>%
+          dplyr::summarise(number_records = n(),
+                           number_species_recorded = n_distinct(species),
+                           proportion_species_recorded = n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species)
+          ) %>% 
+          dplyr::arrange(desc(number_records))
+        
+        dat <- dat %>%
+          sf::st_set_geometry(NULL) %>%
+          dplyr::select(visitID, recordedby, eventdate, number_records, number_species_recorded, proportion_species_recorded) %>%
+          dplyr::rename("observer name" = recordedby,
+                        "date" = eventdate,
+                        "number records" = number_records,
+                        "number species recorded" = number_species_recorded,
+                        "proportion species recorded" = proportion_species_recorded
+          )
+        
+        area_of_interest$metric_table <- dat
+        area_of_interest$visits_table <- dat
+        
+      }
       
       if (input$metric_switch == "Locations"){
-
-          zoom <- input$main_map_zoom
-          
-          res <- case_when(
-            zoom <= 10 ~ 5,
-            zoom <= 12 ~ 6,
-            zoom <= 13 ~ 7,
-            zoom <= 15 ~ 8,
-            TRUE ~ 9
-          )
-          
-          resolution <- paste0("h", res)
-          
+        
+        zoom <- input$main_map_zoom
+        
+        res <- case_when(
+          zoom <= 10 ~ 5,
+          zoom <= 12 ~ 6,
+          zoom <= 13 ~ 7,
+          zoom <= 15 ~ 8,
+          TRUE ~ 9
+        )
+        
+        resolution <- paste0("h", res)
+        
         dat <- dat %>% 
           dplyr::group_by(.data[[resolution]]) %>%
           dplyr::summarise(number_records = n(),
@@ -1099,9 +1225,9 @@ function(input, output, session) {
           sf::st_set_geometry(NULL) %>%
           dplyr::select(all_of(c(resolution, "number_records", "number_species_recorded", "proportion_species_recorded"))) %>%
           dplyr::rename(
-                        "number records" = number_records,
-                        "number species recorded" = number_species_recorded,
-                        "species inventory completeness" = proportion_species_recorded
+            "number records" = number_records,
+            "number species recorded" = number_species_recorded,
+            "species inventory completeness" = proportion_species_recorded
           )
         
         area_of_interest$metric_table <- dat
@@ -1109,7 +1235,7 @@ function(input, output, session) {
         
       }
     } else {
-
+      
       if (isTRUE(input$redo_search)){
         filtered_dat <- area_of_interest$gbif_data_filtered %>%
           dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east)
@@ -1121,17 +1247,33 @@ function(input, output, session) {
         dat <- area_of_interest$records_table %>% 
           dplyr::filter(
             URL %in% paste0("<a href='https://www.gbif.org/occurrence/", filtered_dat$gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", filtered_dat$gbifid, "</a>")
+          ) %>% 
+          dplyr::mutate(
+            date = substr(date, 1, 10) %>% as.character()
+          ) %>% 
+          dplyr::rename(
+            "sensitive record" = "sensitive species"
           )
         area_of_interest$metric_table <- dat
         
       }
       if (input$metric_switch == "Species"){
         dat <- area_of_interest$species_table %>% 
+          dplyr::rename(species = `scientific name`) %>% 
           dplyr::filter(
-            `scientific name` %in% filtered_dat$species
-          )
+            species %in% filtered_dat$species
+          ) %>% 
+          dplyr::left_join(
+            filtered_dat %>% 
+              dplyr::filter(complete.cases(habitat)) %>% 
+              dplyr::group_by(species) %>% 
+              sf::st_set_geometry(NULL) %>% 
+              dplyr::summarise(habitats = paste(table(habitat) %>% sort(decreasing = TRUE) %>% names(), collapse = ", ")),
+            by = "species"
+          ) %>% 
+          dplyr::rename("scientific name" = "species")
         area_of_interest$metric_table <- dat
-
+        
       }
       
       if (input$metric_switch == "Observers"){
@@ -1148,31 +1290,31 @@ function(input, output, session) {
           ) %>% 
           dplyr::select(-proportion_species_recorded)
         area_of_interest$metric_table <- dat
-
+        
       }
       
       if (input$metric_switch == "Visits"){
         
         # if (nrow(area_of_interest$visits_table) != nrow(filtered_data())){
-          dat <- area_of_interest$visits_table[which(area_of_interest$visits_table$visitID %in% (filtered_dat %>% dplyr::pull(visitID) %>% unique())), ] %>% 
-            dplyr::ungroup() %>% 
-            dplyr::mutate(
-              proportion_species_recorded = as.numeric(round(`number species recorded`/nrow(area_of_interest$species_table), 3))
-            ) %>% 
-            dplyr::arrange(desc(proportion_species_recorded)) %>% 
-            dplyr::mutate(
-              `proportion species recorded` = paste0(100*proportion_species_recorded, "%")
-            ) %>% 
-            dplyr::select(-proportion_species_recorded)
-            
+        dat <- area_of_interest$visits_table[which(area_of_interest$visits_table$visitID %in% (filtered_dat %>% dplyr::pull(visitID) %>% unique())), ] %>% 
+          dplyr::ungroup() %>% 
+          dplyr::mutate(
+            proportion_species_recorded = as.numeric(round(`number species recorded`/nrow(area_of_interest$species_table), 3))
+          ) %>% 
+          dplyr::arrange(desc(proportion_species_recorded)) %>% 
+          dplyr::mutate(
+            `proportion species recorded` = paste0(100*proportion_species_recorded, "%")
+          ) %>% 
+          dplyr::select(-proportion_species_recorded)
+        
         # } else {
-          # dat <- area_of_interest$visits_table
+        # dat <- area_of_interest$visits_table
         # }
-
+        
         area_of_interest$metric_table <- dat
         
       }
-
+      
       if (input$metric_switch == "Locations"){
         
         dat <- area_of_interest$gbif_data_filtered %>%
@@ -1213,7 +1355,7 @@ function(input, output, session) {
         names(dat)[1] <- "hexagon"
         
         area_of_interest$metric_table <- dat
-
+        
       }
     }
     
@@ -1222,430 +1364,807 @@ function(input, output, session) {
         sf::st_set_geometry(NULL)
     }
     
-    dat %>% 
-      dplyr::select(-any_of("visitID")) %>% 
-      datatable(options = list(dom = 'tp',
-                               pageLength = 10,
-                               columnDefs = list(
-                                 list(width = "17%", targets = 0)),
-                               language = list(emptyTable = '')
-      ),
-      selection = list(mode = 'multiple', target = 'row', selected = NULL),
-      escape = FALSE,
-      rownames = FALSE
-      )
+    if (input$metric_switch == "Habitats"){
+      dat <- area_of_interest$species_whr_relationships %>% 
+        dplyr::group_by(WHRNAME) %>% 
+        dplyr::summarise(n = sum(n, na.rm = TRUE)) %>% 
+        dplyr::mutate(percentage_total = round(100*(n/sum(n, na.rm = TRUE)), 3)) %>% 
+        dplyr::arrange(desc(percentage_total)) %>% 
+        dplyr::rename(
+          "habitat" = WHRNAME,
+          "number of records" = n,
+          "proportion of total records" = percentage_total
+        )
+      area_of_interest$metric_table <- dat
+      
+    }
+    
+    dat
     
   })
-
+  
+  observeEvent(records_table_data(), {
+    
+    req(records_table_data())
+    
+    dat <- records_table_data()
+    
+    output$records_table <- DT::renderDataTable({
+      
+      out_table <- dat %>%
+        dplyr::select(-any_of("visitID")) %>%
+        datatable(options = list(dom = 'tp',
+                                 pageLength = 10,
+                                 columnDefs = list(
+                                   list(width = "17%", targets = 0)),
+                                 language = list(emptyTable = ''),
+                                 scrollX = TRUE
+        ),
+        selection = list(mode = 'multiple', target = 'row', selected = NULL),
+        escape = FALSE,
+        rownames = FALSE
+        )  %>%
+        formatStyle(1:ncol(dat),"white-space"="nowrap")
+      
+      out_table
+      
+    })
+    
+  })
+  
+  # output$records_table <- DT::renderDataTable({
+  
+  # if (is.null(area_of_interest$records_table)){
+  #   
+  #   if (isTRUE(input$redo_search)){
+  #     dat <- area_of_interest$gbif_data_filtered %>%
+  #       dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east)
+  #   } else {
+  #     dat <- area_of_interest$gbif_data_filtered
+  #   }
+  #   
+  # if (input$metric_switch == "Records"){
+  #   
+  # dat <- dat %>% 
+  #   dplyr::arrange(desc(eventdate), species) 
+  # 
+  # dat <- dat %>%
+  #   sf::st_set_geometry(NULL) %>%
+  #   dplyr::mutate(decimallongitude = round(decimallongitude, 3), decimallatitude = round(decimallatitude, 3),
+  #                 URL = paste0("<a href='https://www.gbif.org/occurrence/", gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", gbifid, "</a>")
+  #   ) %>%
+  #   dplyr::select(species, obscure_from_map, eventdate, habitat, URL, basisofrecord, institutioncode, decimallongitude, decimallatitude, coordinateuncertaintyinmeters, kingdom, phylum, class, order, family, genus) %>%
+  #   dplyr::rename("scientific name" = species,
+  #                 "sensitive record" = obscure_from_map,
+  #                 "date" = eventdate,
+  #                 "record type" = basisofrecord,
+  #                 "longitude" = decimallongitude,
+  #                 "latitude" = decimallatitude,
+  #                 "uncertainty (m)" = coordinateuncertaintyinmeters,
+  #                 "institution code" = institutioncode
+  #   )
+  # area_of_interest$metric_table <- dat
+  # area_of_interest$records_table <- dat
+  # 
+  # }
+  # 
+  # if (input$metric_switch == "Species"){
+  # 
+  #   dat <- dat %>% 
+  #     dplyr::group_by(species, kingdom, phylum, class, order, family, genus) %>%
+  #     dplyr::summarise(number_records = n(),
+  #                      number_years_recorded = n_distinct(year)
+  #     ) %>% 
+  #     dplyr::arrange(desc(number_records))
+  #   
+  #   dat <- dat %>%
+  #     sf::st_set_geometry(NULL) %>%
+  #     dplyr::select(species, number_records, number_years_recorded, kingdom, phylum, class, order, family, genus) %>%
+  #     dplyr::rename("scientific name" = species,
+  #                   "number records" = number_records,
+  #                   "number years recorded" = number_years_recorded
+  #     ) 
+  #   
+  #   area_of_interest$metric_table <- dat
+  #   area_of_interest$species_table <- dat
+  #   
+  # }
+  # 
+  # if (input$metric_switch == "Observers"){
+  # 
+  #   dat <- dat %>% 
+  #     dplyr::group_by(recordedby) %>%
+  #     dplyr::summarise(number_records = n(),
+  #                      number_species_recorded = n_distinct(species),
+  #                      proportion_species_recorded = n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species),
+  #                      number_years_recorded = n_distinct(year)
+  #     ) %>% 
+  #     dplyr::arrange(desc(number_records)) 
+  #   
+  #   dat <- dat %>%
+  #     sf::st_set_geometry(NULL) %>%
+  #     dplyr::select(recordedby, number_records, number_species_recorded, proportion_species_recorded, number_years_recorded) %>%
+  #     dplyr::rename("observer name" = recordedby,
+  #                   "number records" = number_records,
+  #                   "number species recorded" = number_species_recorded,
+  #                   "proportion species recorded" = proportion_species_recorded,
+  #                   "number years recorded" = number_years_recorded
+  #     )
+  #   
+  #   area_of_interest$metric_table <- dat
+  #   area_of_interest$observers_table <- dat
+  #   
+  # }
+  # 
+  # if (input$metric_switch == "Visits"){
+  # 
+  #   dat <- dat %>% 
+  #     dplyr::group_by(visitID, recordedby, eventdate) %>%
+  #     dplyr::summarise(number_records = n(),
+  #                      number_species_recorded = n_distinct(species),
+  #                      proportion_species_recorded = n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species)
+  #     ) %>% 
+  #     dplyr::arrange(desc(number_records))
+  #   
+  #   dat <- dat %>%
+  #     sf::st_set_geometry(NULL) %>%
+  #     dplyr::select(visitID, recordedby, eventdate, number_records, number_species_recorded, proportion_species_recorded) %>%
+  #     dplyr::rename("observer name" = recordedby,
+  #                   "date" = eventdate,
+  #                   "number records" = number_records,
+  #                   "number species recorded" = number_species_recorded,
+  #                   "proportion species recorded" = proportion_species_recorded
+  #     )
+  #   
+  #   area_of_interest$metric_table <- dat
+  #   area_of_interest$visits_table <- dat
+  # 
+  # }
+  #   
+  #   if (input$metric_switch == "Locations"){
+  # 
+  #       zoom <- input$main_map_zoom
+  #       
+  #       res <- case_when(
+  #         zoom <= 10 ~ 5,
+  #         zoom <= 12 ~ 6,
+  #         zoom <= 13 ~ 7,
+  #         zoom <= 15 ~ 8,
+  #         TRUE ~ 9
+  #       )
+  #       
+  #       resolution <- paste0("h", res)
+  #       
+  #     dat <- dat %>% 
+  #       dplyr::group_by(.data[[resolution]]) %>%
+  #       dplyr::summarise(number_records = n(),
+  #                        number_species_recorded = n_distinct(species),
+  #                        proportion_species_recorded = as.numeric(round((n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species)), 3)),
+  #       ) %>% 
+  #       dplyr::arrange(desc(proportion_species_recorded)) %>% 
+  #       dplyr::mutate(
+  #         proportion_species_recorded = paste0(100*proportion_species_recorded, "%")
+  #       )
+  #     
+  #     dat <- dat %>%
+  #       sf::st_set_geometry(NULL) %>%
+  #       dplyr::select(all_of(c(resolution, "number_records", "number_species_recorded", "proportion_species_recorded"))) %>%
+  #       dplyr::rename(
+  #                     "number records" = number_records,
+  #                     "number species recorded" = number_species_recorded,
+  #                     "species inventory completeness" = proportion_species_recorded
+  #       )
+  #     
+  #     area_of_interest$metric_table <- dat
+  #     area_of_interest$completeness_table <- dat
+  #     
+  #   }
+  # } else {
+  # 
+  #   if (isTRUE(input$redo_search)){
+  #     filtered_dat <- area_of_interest$gbif_data_filtered %>%
+  #       dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east)
+  #   } else {
+  #     filtered_dat <- area_of_interest$gbif_data_filtered
+  #   }
+  #   
+  #   if (input$metric_switch == "Records"){
+  #     dat <- area_of_interest$records_table %>% 
+  #       dplyr::filter(
+  #         URL %in% paste0("<a href='https://www.gbif.org/occurrence/", filtered_dat$gbifid, "' target='_blank' onmousedown='event.stopPropagation();'>", filtered_dat$gbifid, "</a>")
+  #       )
+  #     area_of_interest$metric_table <- dat
+  #     
+  #   }
+  #   if (input$metric_switch == "Species"){
+  #     dat <- area_of_interest$species_table %>% 
+  #       dplyr::filter(
+  #         `scientific name` %in% filtered_dat$species
+  #       )
+  #     area_of_interest$metric_table <- dat
+  # 
+  #   }
+  #   
+  #   if (input$metric_switch == "Observers"){
+  #     dat <- area_of_interest$observers_table %>% 
+  #       dplyr::filter(
+  #         `observer name` %in% filtered_dat$recordedby
+  #       ) %>% 
+  #       dplyr::mutate(
+  #         proportion_species_recorded = as.numeric(round(`number species recorded`/nrow(area_of_interest$species_table), 3))
+  #       ) %>% 
+  #       dplyr::arrange(desc(proportion_species_recorded)) %>% 
+  #       dplyr::mutate(
+  #         `proportion species recorded` = paste0(100*proportion_species_recorded, "%")
+  #       ) %>% 
+  #       dplyr::select(-proportion_species_recorded)
+  #     area_of_interest$metric_table <- dat
+  # 
+  #   }
+  #   
+  #   if (input$metric_switch == "Visits"){
+  #     
+  #     # if (nrow(area_of_interest$visits_table) != nrow(filtered_data())){
+  #       dat <- area_of_interest$visits_table[which(area_of_interest$visits_table$visitID %in% (filtered_dat %>% dplyr::pull(visitID) %>% unique())), ] %>% 
+  #         dplyr::ungroup() %>% 
+  #         dplyr::mutate(
+  #           proportion_species_recorded = as.numeric(round(`number species recorded`/nrow(area_of_interest$species_table), 3))
+  #         ) %>% 
+  #         dplyr::arrange(desc(proportion_species_recorded)) %>% 
+  #         dplyr::mutate(
+  #           `proportion species recorded` = paste0(100*proportion_species_recorded, "%")
+  #         ) %>% 
+  #         dplyr::select(-proportion_species_recorded)
+  #         
+  #     # } else {
+  #       # dat <- area_of_interest$visits_table
+  #     # }
+  # 
+  #     area_of_interest$metric_table <- dat
+  #     
+  #   }
+  # 
+  #   if (input$metric_switch == "Locations"){
+  #     
+  #     dat <- area_of_interest$gbif_data_filtered %>%
+  #       dplyr::filter(decimallatitude >= input$main_map_bounds$south & decimallatitude <= input$main_map_bounds$north & decimallongitude >= input$main_map_bounds$west & decimallongitude <= input$main_map_bounds$east)
+  #     
+  #     zoom <- input$main_map_zoom
+  #     
+  #     res <- case_when(
+  #       zoom <= 10 ~ 5,
+  #       zoom <= 12 ~ 6,
+  #       zoom <= 13 ~ 7,
+  #       zoom <= 15 ~ 8,
+  #       TRUE ~ 9
+  #     )
+  #     
+  #     resolution <- paste0("h", res)
+  #     
+  #     dat <- dat %>% 
+  #       dplyr::group_by(.data[[resolution]]) %>%
+  #       dplyr::summarise(number_records = n(),
+  #                        number_species_recorded = n_distinct(species),
+  #                        proportion_species_recorded = as.numeric(round((n_distinct(species)/n_distinct(area_of_interest$gbif_data_filtered$species)), 3)),
+  #       ) %>% 
+  #       dplyr::arrange(desc(proportion_species_recorded)) %>% 
+  #       dplyr::mutate(
+  #         proportion_species_recorded = paste0(100*proportion_species_recorded, "%")
+  #       )
+  #     
+  #     dat <- dat %>%
+  #       sf::st_set_geometry(NULL) %>%
+  #       dplyr::select(all_of(c(resolution, "number_records", "number_species_recorded", "proportion_species_recorded"))) %>%
+  #       dplyr::rename(
+  #         "number records" = number_records,
+  #         "number species recorded" = number_species_recorded,
+  #         "species inventory completeness" = proportion_species_recorded
+  #       )
+  #     
+  #     names(dat)[1] <- "hexagon"
+  #     
+  #     area_of_interest$metric_table <- dat
+  # 
+  #   }
+  # }
+  # 
+  # if (input$metric_switch == "Trends"){
+  #   dat <- area_of_interest$metric_table[1, ][-1, ] %>%
+  #     sf::st_set_geometry(NULL)
+  # }
+  # 
+  # if (input$metric_switch == "Habitats"){
+  #   dat <- area_of_interest$species_whr_relationships %>% 
+  #     dplyr::group_by(WHRNAME) %>% 
+  #     dplyr::summarise(n = sum(n, na.rm = TRUE)) %>% 
+  #     dplyr::mutate(percentage_total = round(100*(n/sum(n, na.rm = TRUE)), 3)) %>% 
+  #     dplyr::arrange(desc(percentage_total)) %>% 
+  #     dplyr::rename(
+  #       "habitat" = WHRNAME,
+  #       "number of records" = n,
+  #       "proportion of total records" = percentage_total
+  #     )
+  #   area_of_interest$metric_table <- dat
+  #   
+  # }
+  
+  # if (input$metric_switch != "Habitats") {
+  # out_table <- dat %>%
+  #   dplyr::select(-any_of("visitID")) %>%
+  #   datatable(options = list(dom = 'tp',
+  #                            pageLength = 10,
+  #                            columnDefs = list(
+  #                              list(width = "17%", targets = 0)),
+  #                            language = list(emptyTable = ''),
+  #                            scrollX = TRUE
+  #   ),
+  #   selection = list(mode = 'multiple', target = 'row', selected = NULL),
+  #   escape = FALSE,
+  #   rownames = FALSE
+  #   )
+  # } else {
+  #   out_table <- dat %>%
+  #     dplyr::select(-any_of("visitID")) %>%
+  #     datatable(options = list(dom = 'tp',
+  #                              pageLength = 10,
+  #                              columnDefs = list(
+  #                                list(width = "17%", targets = 0)),
+  #                              language = list(emptyTable = ''),
+  #                              scrollX = TRUE
+  #     ),
+  #     selection = list(mode = 'multiple', target = 'row', selected = NULL),
+  #     escape = FALSE,
+  #     rownames = FALSE,
+  #     width = "20vw"
+  #     )
+  # }
+  # 
+  # out_table
+  
+  # })
+  
   observe({
-
-    if (!is.null(area_of_interest$gbif_data) & input$pages == "TRENDS"){
-
-      if (input$select_map_aoi %in% gsub("_data.rds", "", aoi_available_outputs)){ 
+    
+    if (!is.null(area_of_interest$gbif_data_filtered) & input$pages == "TRENDS"){
+      
+      # if (input$select_map_aoi %in% gsub("_data_full.rds", "", list.files("data/outputs"))){
+      if (input$select_map_aoi %in% gsub("_data_full.rds", "", aoi_available_outputs)){ 
+        
+        # aoi <- readRDS(paste0("data/outputs/", input$select_map_aoi, "_data_full.rds"))
         
         aoi <- read_github_rds(
           owner = "elimia-analytics",
           repo  = "california-biodiversity-trends-engine",
           path  = "data/outputs",
-          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data.rds"))
+          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data_full.rds"))
         )
-
+        
         area_of_interest$trends_table <- aoi$trends_table
         area_of_interest$species_trends_list <- aoi$species_trends_list
-        area_of_interest$biggest_movers_table <- aoi$biggest_movers_table
-        area_of_interest$focal_species_trends_table <- aoi$focal_species_trends_table
-
-      } else {
-
-      # Create a Progress object
-      progress <- shiny::Progress$new()
-      # Make sure it closes when we exit this reactive, even if there's an error
-      on.exit(progress$close())
-
-      progress$set(message = "Calculating Species Trends", value = 0)
-
-      area_of_interest$species_trends_list <- purrr::map(area_of_interest$trends_table$species, function(sp){
-
-        # progress$inc(1/length(area_of_interest$trends_table$species), detail = paste0("Detecting trend for ", sp))
-
-        out <- purrr::safely(get_species_trends)(analysis_records = area_of_interest$gbif_data,
-                           focal_taxon = sp,
-                           use_reference_taxon = area_of_interest$trends_table %>% dplyr::filter(species == sp) %>% dplyr::pull(full) %>% isFALSE(),
-                           species_association_matrix = area_of_interest$species_association_matrix,
-                           full = area_of_interest$trends_table %>% dplyr::filter(species == sp) %>% dplyr::pull(full),
-                           resolution = "h5"
-                           )
-        out$result
-
-      }) %>% purrr::set_names(area_of_interest$trends_table$species)
-
-      species_metrics_df <- get_yearly_trend_metrics(area_of_interest$species_trends_list)
-
-      area_of_interest$biggest_movers_table <- area_of_interest$trends_table %>%
-        dplyr::ungroup() %>%
-        dplyr::left_join(species_metrics_df, by = "species") %>%
-        dplyr::mutate(trend = case_when(
-          (reporting_rate_above_last_ten >= 5  & reporting_rate_below_last_ten < 3) | reporting_rate_trend_last_five >= 0.7 | reporting_rate_trend_last_ten >= 0.7 ~ "increasing",
-          (reporting_rate_above_last_ten < 5  & reporting_rate_below_last_ten >= 3) | reporting_rate_trend_last_five <= -0.5 | reporting_rate_trend_last_ten <= -0.5 ~ "decreasing",
-          is.na(reporting_rate_above_last_ten) ~ "needs more data",
-          .default = "stable"
-        ),
-        trend_icon = case_when(
-          trend == "increasing" ~ as.character(icon("arrow-up", "fa-2x", style = "color: #67a9cf;")),
-          trend == "decreasing" ~ as.character(icon("arrow-down", "fa-2x", style = "color: #ef8a62;")),
-          trend == "needs more data" ~ as.character(icon("question", "fa-2x", style = "color: #BEBEBE;")),
-          trend == "stable" ~ as.character(icon("equals", "fa-2x", style = "color: #BEBEBE;"))
-        ),
-        reporting_rate_trend_last_five = round(reporting_rate_trend_last_five, 3),
-        reporting_rate_trend_last_ten = round(reporting_rate_trend_last_ten, 3)
-        ) %>%
-        dplyr::select(species, trend, trend_icon, number_records, number_years_recorded, reporting_rate_above_last_ten, reporting_rate_below_last_ten, reporting_rate_trend_last_five, reporting_rate_trend_last_ten)
-
-      }
-
+        
+        species_metrics_df <- get_yearly_trend_metrics(trends = area_of_interest$species_trends_list)
+        
+        #### Identify increases/decreases
+        area_of_interest$biggest_movers_table <- area_of_interest$trends_table %>%
+          dplyr::ungroup() %>%
+          dplyr::left_join(species_metrics_df, by = "species") %>%
+          dplyr::mutate(trend = case_when(
+            (reporting_rate_above_0_last_ten >= 5  & reporting_rate_below_signif_last_ten < 2) & (reporting_rate_trend_last_five >= 0.25 | reporting_rate_trend_last_ten >= 0) ~ "increasing",
+            (reporting_rate_above_signif_last_ten < 2  & reporting_rate_below_0_last_ten >= 5) & (reporting_rate_trend_last_five <= -0.25 | reporting_rate_trend_last_ten <= 0) ~ "decreasing",
+            is.na(reporting_rate_above_last_ten) ~ "needs more data",
+            .default = "stable"
+          ),
+          trend_icon = case_when(
+            trend == "increasing" ~ as.character(icon("arrow-up", "fa-2x", style = "color: #67a9cf;")),
+            trend == "decreasing" ~ as.character(icon("arrow-down", "fa-2x", style = "color: #ef8a62;")),
+            trend == "needs more data" ~ as.character(icon("question", "fa-2x", style = "color: #BEBEBE;")),
+            trend == "stable" ~ as.character(icon("equals", "fa-2x", style = "color: #BEBEBE;"))
+          ),
+          reporting_rate_trend_last_five = round(reporting_rate_trend_last_five, 3),
+          reporting_rate_trend_last_ten = round(reporting_rate_trend_last_ten, 3)
+          ) %>%
+          dplyr::select(species, trend, trend_icon, number_records, number_years_recorded, reporting_rate_above_0_last_ten, reporting_rate_below_0_last_ten, reporting_rate_trend_last_five, reporting_rate_trend_last_ten)
+        
+      } # else {
+      # 
+      #       # Create a Progress object
+      #       progress <- shiny::Progress$new()
+      #       # Make sure it closes when we exit this reactive, even if there's an error
+      #       on.exit(progress$close())
+      # 
+      #       progress$set(message = "Calculating Species Trends", value = 0)
+      # 
+      #       area_of_interest$species_trends_list <- purrr::map(area_of_interest$trends_table$species, function(sp){
+      # 
+      #         # progress$inc(1/length(area_of_interest$trends_table$species), detail = paste0("Detecting trend for ", sp))
+      # 
+      #         out <- purrr::safely(get_species_trends)(analysis_records = area_of_interest$gbif_data,
+      #                            focal_taxon = sp,
+      #                            use_reference_taxon = area_of_interest$trends_table %>% dplyr::filter(species == sp) %>% dplyr::pull(full) %>% isFALSE(),
+      #                            species_association_matrix = area_of_interest$species_association_matrix,
+      #                            full = area_of_interest$trends_table %>% dplyr::filter(species == sp) %>% dplyr::pull(full),
+      #                            resolution = "h5"
+      #                            )
+      #         out$result
+      # 
+      #       }) %>% purrr::set_names(area_of_interest$trends_table$species)
+      # 
+      #       species_metrics_df <- get_yearly_trend_metrics(area_of_interest$species_trends_list)
+      # 
+      #       area_of_interest$biggest_movers_table <- area_of_interest$trends_table %>%
+      #         dplyr::ungroup() %>%
+      #         dplyr::left_join(species_metrics_df, by = "species") %>%
+      #         dplyr::mutate(trend = case_when(
+      #           (reporting_rate_above_last_ten >= 5  & reporting_rate_below_last_ten < 3) | reporting_rate_trend_last_five >= 0.7 | reporting_rate_trend_last_ten >= 0.7 ~ "increasing",
+      #           (reporting_rate_above_last_ten < 5  & reporting_rate_below_last_ten >= 3) | reporting_rate_trend_last_five <= -0.5 | reporting_rate_trend_last_ten <= -0.5 ~ "decreasing",
+      #           is.na(reporting_rate_above_last_ten) ~ "needs more data",
+      #           .default = "stable"
+      #         ),
+      #         trend_icon = case_when(
+      #           trend == "increasing" ~ as.character(icon("arrow-up", "fa-2x", style = "color: #67a9cf;")),
+      #           trend == "decreasing" ~ as.character(icon("arrow-down", "fa-2x", style = "color: #ef8a62;")),
+      #           trend == "needs more data" ~ as.character(icon("question", "fa-2x", style = "color: #BEBEBE;")),
+      #           trend == "stable" ~ as.character(icon("equals", "fa-2x", style = "color: #BEBEBE;"))
+      #         ),
+      #         reporting_rate_trend_last_five = round(reporting_rate_trend_last_five, 3),
+      #         reporting_rate_trend_last_ten = round(reporting_rate_trend_last_ten, 3)
+      #         ) %>%
+      #         dplyr::select(species, trend, trend_icon, number_records, number_years_recorded, reporting_rate_above_last_ten, reporting_rate_below_last_ten, reporting_rate_trend_last_five, reporting_rate_trend_last_ten)
+      # 
+      #       }
+      
       area_of_interest$focal_species_trends_table <- rbind(
         area_of_interest$biggest_movers_table %>%
           dplyr::filter(trend == "increasing") %>%
-          dplyr::arrange(desc(reporting_rate_above_last_ten), desc(reporting_rate_trend_last_five), desc(reporting_rate_trend_last_ten)) %>%
+          dplyr::arrange(desc(reporting_rate_above_0_last_ten), desc(reporting_rate_trend_last_ten), desc(reporting_rate_trend_last_five)) %>%
           dplyr::slice_head(n = 5),
         area_of_interest$biggest_movers_table %>%
           dplyr::filter(trend == "decreasing") %>%
-          dplyr::arrange(desc(reporting_rate_below_last_ten), reporting_rate_trend_last_five, reporting_rate_trend_last_ten) %>%
+          dplyr::arrange(desc(reporting_rate_below_0_last_ten), reporting_rate_trend_last_ten, reporting_rate_trend_last_five) %>%
           dplyr::slice_head(n = 5)
       )
-
+      
       output$trends_table <- DT::renderDataTable({
-
+        
         out_tab <- area_of_interest$focal_species_trends_table %>%
           dplyr::select(-trend) %>%
           dplyr::left_join(area_of_interest$gbif_data %>% sf::st_set_geometry(NULL) %>% dplyr::filter(species %in% area_of_interest$focal_species_trends_table$species) %>% dplyr::select(species, specieskey) %>% dplyr::distinct(.keep_all = TRUE), by = "species") %>%
+          dplyr::distinct(species, .keep_all = TRUE) %>% 
           dplyr::mutate(
-            species = paste0("<a href='https://www.gbif.org/species/", specieskey, "' target='_blank' onmousedown='event.stopPropagation();'>", species, "</a>")
+            species = paste0("<a href='https://www.gbif.org/species/", specieskey, "' target='_blank' onmousedown='event.stopPropagation();'><i>", species, "</i></a>"),
+            reporting_rate_trend_last_five = sprintf("%.2f", reporting_rate_trend_last_five),
+            reporting_rate_trend_last_ten = sprintf("%.2f", reporting_rate_trend_last_ten)
           ) %>%
-          dplyr::select(-specieskey) %>%
+          dplyr::select(-specieskey, -reporting_rate_above_0_last_ten, -reporting_rate_below_0_last_ten) %>%
           dplyr::rename(
             "Species" = species,
             "Trend" = trend_icon,
-            "Number of records" = number_records,
-            "Number of years recorded" = number_years_recorded,
-            "High reporting rate instances" = reporting_rate_above_last_ten,
-            "Low reporting rate instances" = reporting_rate_below_last_ten,
-            "Reporting rate trend in last 5 years" = reporting_rate_trend_last_five,
-            "Reporting rate trend in last 10 years" = reporting_rate_trend_last_ten
+            "Total records" = number_records,
+            "Years recorded" = number_years_recorded,
+            "5-year trend" = reporting_rate_trend_last_five,
+            "10-year trend" = reporting_rate_trend_last_ten
           )
-
+        
         out_tab <- out_tab %>%
-          datatable(options = list(dom = 'tp',
+          datatable(class="hover compact",
+                    options = list(dom = 'tp',
                                    pageLength = 10,
                                    columnDefs = list(list(width = "25%", targets = 0)),
                                    language = list(emptyTable = '')
-          ),
-          selection = list(mode = 'single', target = 'row', selected = 1),
-          escape = FALSE,
-          rownames = FALSE
+                    ),
+                    selection = list(mode = 'single', target = 'row', selected = 1),
+                    escape = FALSE,
+                    rownames = FALSE
           )
-
-        if (sum(area_of_interest$focal_species_trends_table$trend == "decreasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:ncol(area_of_interest$focal_species_trends_table), backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "decreasing"), values = "#ef8a6250"))
-        if (sum(area_of_interest$focal_species_trends_table$trend == "increasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:ncol(area_of_interest$focal_species_trends_table), backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "increasing"), values = "#67a9cf50"))
-
+        
+        if (sum(area_of_interest$focal_species_trends_table$trend == "decreasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:2, backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "decreasing"), values = "#ef8a6250"))
+        if (sum(area_of_interest$focal_species_trends_table$trend == "increasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:2, backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "increasing"), values = "#67a9cf50"))
+        
         out_tab
-
+        
       })
-
+      
     }
-
-      updateSelectizeInput(session = session, inputId = "select_species_trend", choices = c("", area_of_interest$biggest_movers_table$species))
-
-      # }
-
-    })
-
+    
+    updateSelectizeInput(session = session, inputId = "select_species_trend", choices = c("", area_of_interest$biggest_movers_table$species), server = TRUE)
+    
+    # }
+    
+  })
+  
   observeEvent({
     input$species_trends_tabs
-    }, {
-
-    if (!is.null(area_of_interest$gbif_data) & input$pages == "TRENDS"){
-
-    # Save the object to the global environment
-    if (input$species_trends_tabs == "At a Glance"){
-
-      area_of_interest$focal_species_trends_table <- rbind(
-        area_of_interest$biggest_movers_table %>%
-          dplyr::filter(trend == "increasing") %>%
-          dplyr::arrange(desc(reporting_rate_above_last_ten), desc(reporting_rate_trend_last_five), desc(reporting_rate_trend_last_ten)) %>%
-          dplyr::slice_head(n = 5),
-        area_of_interest$biggest_movers_table %>%
+  }, {
+    
+    if (!is.null(area_of_interest$gbif_data_filtered) & input$pages == "TRENDS"){
+      
+      # Save the object to the global environment
+      if (input$species_trends_tabs == "At a Glance"){
+        
+        area_of_interest$focal_species_trends_table <- rbind(
+          area_of_interest$biggest_movers_table %>%
+            dplyr::filter(trend == "increasing") %>%
+            dplyr::arrange(desc(reporting_rate_above_0_last_ten), desc(reporting_rate_trend_last_ten), desc(reporting_rate_trend_last_five)) %>%
+            dplyr::slice_head(n = 5),
+          area_of_interest$biggest_movers_table %>%
+            dplyr::filter(trend == "decreasing") %>%
+            dplyr::arrange(desc(reporting_rate_below_0_last_ten), reporting_rate_trend_last_ten, reporting_rate_trend_last_five) %>%
+            dplyr::slice_head(n = 5)
+        ) 
+        
+      }
+      
+      if (input$species_trends_tabs == "Decreasing Species"){
+        area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
           dplyr::filter(trend == "decreasing") %>%
-          dplyr::arrange(desc(reporting_rate_below_last_ten), reporting_rate_trend_last_five, reporting_rate_trend_last_ten) %>%
-          dplyr::slice_head(n = 5)
-      )
-
-    }
-
-    if (input$species_trends_tabs == "Decreasing Species"){
-      area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
-        dplyr::filter(trend == "decreasing") %>%
-        dplyr::arrange(desc(reporting_rate_below_last_ten), reporting_rate_trend_last_five, reporting_rate_trend_last_ten)
-    }
-
-    if (input$species_trends_tabs == "Increasing Species"){
-      area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
-        dplyr::filter(trend == "increasing") %>%
-        dplyr::arrange(desc(reporting_rate_above_last_ten), desc(reporting_rate_trend_last_five), desc(reporting_rate_trend_last_ten))
-    }
-
-    if (input$species_trends_tabs == "All Species"){
-      area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
-        dplyr::arrange(species)
-    }
-
-    output$trends_table <- DT::renderDataTable({
-
-      out_tab <- area_of_interest$focal_species_trends_table %>%
-        dplyr::select(-trend) %>%
-        dplyr::left_join(area_of_interest$gbif_data %>% sf::st_set_geometry(NULL) %>% dplyr::filter(species %in% area_of_interest$focal_species_trends_table$species) %>% dplyr::select(species, specieskey) %>% dplyr::distinct(.keep_all = TRUE), by = "species") %>%
-        dplyr::mutate(
-          species = paste0("<a href='https://www.gbif.org/species/", specieskey, "' target='_blank' onmousedown='event.stopPropagation();'>", species, "</a>")
-        ) %>%
-        dplyr::select(-specieskey) %>%
-        dplyr::rename(
-          "Species" = species,
-          "Trend" = trend_icon,
-          "Number of records" = number_records,
-          "Number of years recorded" = number_years_recorded,
-          "High reporting rate instances" = reporting_rate_above_last_ten,
-          "Low reporting rate instances" = reporting_rate_below_last_ten,
-          "Reporting rate trend in last 5 years" = reporting_rate_trend_last_five,
-          "Reporting rate trend in last 10 years" = reporting_rate_trend_last_ten
-        )
-
-      out_tab <- out_tab %>%
-        datatable(options = list(dom = 'tp',
-                                 pageLength = 10,
-                                 columnDefs = list(list(width = "25%", targets = 0)),
-                                 language = list(emptyTable = '')
-        ),
-        selection = list(mode = 'single', target = 'row', selected = 1),
-        escape = FALSE,
-        rownames = FALSE
-        )
-
-      if (sum(area_of_interest$focal_species_trends_table$trend == "decreasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:ncol(area_of_interest$focal_species_trends_table), backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "decreasing"), values = "#ef8a6250"))
-      if (sum(area_of_interest$focal_species_trends_table$trend == "increasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:ncol(area_of_interest$focal_species_trends_table), backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "increasing"), values = "#67a9cf50"))
-
-      out_tab
-
-    })
-
-    updateSelectizeInput(session = session, inputId = "select_species_trend", choices = c("", area_of_interest$focal_species_trends_table$species))
-
+          dplyr::arrange(desc(reporting_rate_below_0_last_ten), reporting_rate_trend_last_ten, reporting_rate_trend_last_five)
+      }
+      
+      if (input$species_trends_tabs == "Increasing Species"){
+        area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
+          dplyr::filter(trend == "increasing") %>%
+          dplyr::arrange(desc(reporting_rate_above_0_last_ten), desc(reporting_rate_trend_last_ten), desc(reporting_rate_trend_last_five))
+      }
+      
+      if (input$species_trends_tabs == "All Species"){
+        area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
+          dplyr::arrange(species)
+      }
+      
+      assign("focal_species_trends_table", area_of_interest$focal_species_trends_table, pos = 1)
+      
+      output$trends_table <- DT::renderDataTable({
+        
+        out_tab <- area_of_interest$focal_species_trends_table %>%
+          dplyr::select(-trend) %>%
+          dplyr::left_join(area_of_interest$gbif_data %>% sf::st_set_geometry(NULL) %>% dplyr::filter(species %in% area_of_interest$focal_species_trends_table$species) %>% dplyr::select(species, specieskey) %>% dplyr::distinct(.keep_all = TRUE), by = "species") %>%
+          dplyr::distinct(species, .keep_all = TRUE) %>% 
+          dplyr::mutate(
+            species = paste0("<a href='https://www.gbif.org/species/", specieskey, "' target='_blank' onmousedown='event.stopPropagation();'><i>", species, "</i></a>"),
+            reporting_rate_trend_last_five = sprintf("%.2f", reporting_rate_trend_last_five),
+            reporting_rate_trend_last_ten = sprintf("%.2f", reporting_rate_trend_last_ten)
+          ) %>%
+          dplyr::select(-specieskey, -reporting_rate_above_0_last_ten, -reporting_rate_below_0_last_ten) %>%
+          dplyr::rename(
+            "Species" = species,
+            "Trend" = trend_icon,
+            "Total records" = number_records,
+            "Years recorded" = number_years_recorded,
+            "5-year trend" = reporting_rate_trend_last_five,
+            "10-year trend" = reporting_rate_trend_last_ten
+          )
+        
+        print(names(out_tab))
+        
+        out_tab <- out_tab %>%
+          datatable(class="hover compact",
+                    options = list(dom = 'tp',
+                                   pageLength = 10,
+                                   columnDefs = list(list(width = "25%", targets = 0)),
+                                   language = list(emptyTable = '')
+                    ),
+                    selection = list(mode = 'single', target = 'row', selected = 1),
+                    escape = FALSE,
+                    rownames = FALSE
+          )
+        
+        if (sum(area_of_interest$focal_species_trends_table$trend == "decreasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:2, backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "decreasing"), values = "#ef8a6250"))
+        if (sum(area_of_interest$focal_species_trends_table$trend == "increasing") > 0) out_tab <- out_tab %>% formatStyle(columns = 1:2, backgroundColor = styleRow(rows = which(area_of_interest$focal_species_trends_table$trend == "increasing"), values = "#67a9cf50"))
+        
+        out_tab
+        
+      })
+      
+      updateSelectizeInput(session = session, inputId = "select_species_trend", choices = c("", area_of_interest$focal_species_trends_table$species), server = TRUE)
+      
     }
   })
+  
   observeEvent({
     input$select_species_trend
   }, {
-
-  if (!is.null(input$select_species_trend)){
-    if (input$select_species_trend != ""){
-      area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
-        dplyr::filter(species == input$select_species_trend)
+    
+    if (!is.null(input$select_species_trend)){
+      if (input$select_species_trend != ""){
+        area_of_interest$focal_species_trends_table <- area_of_interest$biggest_movers_table %>%
+          dplyr::filter(species == input$select_species_trend)
+      }
     }
-  }
   })
-
+  
   observeEvent({
     input$trends_table_rows_selected
-    }, {
-
-      if (!is.null(input$trends_table_rows_selected)){
-
-        if (input$species_trends_tabs == "At a Glance"){
-          focal_species <- rbind(
-            area_of_interest$biggest_movers_table %>%
-              dplyr::filter(trend == "increasing") %>%
-              dplyr::arrange(desc(reporting_rate_above_last_ten), desc(reporting_rate_trend_last_five), desc(reporting_rate_trend_last_ten)) %>%
-              dplyr::slice_head(n = 5),
-            area_of_interest$biggest_movers_table %>%
-              dplyr::filter(trend == "decreasing") %>%
-              dplyr::arrange(desc(reporting_rate_below_last_ten), reporting_rate_trend_last_five, reporting_rate_trend_last_ten) %>%
-              dplyr::slice_head(n = 5)
-          ) %>%
-            dplyr::pull(species)
-        }
-
-        if (input$species_trends_tabs == "Decreasing Species"){
-          focal_species <- area_of_interest$biggest_movers_table %>%
-            dplyr::filter(trend == "decreasing") %>%
-            dplyr::arrange(desc(reporting_rate_below_last_ten), reporting_rate_trend_last_five, reporting_rate_trend_last_ten) %>%
-            dplyr::pull(species)
-        }
-
-        if (input$species_trends_tabs == "Increasing Species"){
-          focal_species <- area_of_interest$biggest_movers_table %>%
+  }, {
+    
+    if (!is.null(input$trends_table_rows_selected)){
+      
+      if (input$species_trends_tabs == "At a Glance"){
+        focal_species <- rbind(
+          area_of_interest$biggest_movers_table %>%
             dplyr::filter(trend == "increasing") %>%
-            dplyr::arrange(desc(reporting_rate_above_last_ten), desc(reporting_rate_trend_last_five), desc(reporting_rate_trend_last_ten)) %>%
-            dplyr::pull(species)
+            dplyr::arrange(desc(reporting_rate_above_0_last_ten), desc(reporting_rate_trend_last_ten), desc(reporting_rate_trend_last_five)) %>%
+            dplyr::slice_head(n = 5),
+          area_of_interest$biggest_movers_table %>%
+            dplyr::filter(trend == "decreasing") %>%
+            dplyr::arrange(desc(reporting_rate_below_0_last_ten), reporting_rate_trend_last_ten, reporting_rate_trend_last_five) %>%
+            dplyr::slice_head(n = 5)
+        ) %>%
+          dplyr::pull(species)
+      }
+      
+      if (input$species_trends_tabs == "Decreasing Species"){
+        focal_species <- area_of_interest$biggest_movers_table %>%
+          dplyr::filter(trend == "decreasing") %>%
+          dplyr::arrange(desc(reporting_rate_below_0_last_ten), desc(reporting_rate_trend_last_ten), desc(reporting_rate_trend_last_five)) %>% 
+          dplyr::pull(species)
+      }
+      
+      if (input$species_trends_tabs == "Increasing Species"){
+        focal_species <- area_of_interest$biggest_movers_table %>%
+          dplyr::filter(trend == "increasing") %>%
+          dplyr::arrange(desc(reporting_rate_below_0_last_ten), reporting_rate_trend_last_ten, reporting_rate_trend_last_five) %>%
+          dplyr::pull(species)
+      }
+      
+      if (input$species_trends_tabs == "All Species"){
+        focal_species <- area_of_interest$biggest_movers_table %>%
+          dplyr::arrange(species) %>%
+          dplyr::pull(species)
+      }
+      
+      if (!is.null(input$select_species_trend)){
+        if (input$select_species_trend != ""){
+          focal_species <- input$select_species_trend
         }
-
-        if (input$species_trends_tabs == "All Species"){
-          focal_species <- area_of_interest$biggest_movers_table %>%
-            dplyr::arrange(species) %>%
-            dplyr::pull(species)
-        }
-
-        if (!is.null(input$select_species_trend)){
-          if (input$select_species_trend != ""){
-            focal_species <- input$select_species_trend
-          }
-        }
-
-        focal_taxon_name <- focal_species[input$trends_table_rows_selected]
-
-        output$species_trends_output <- plotly::renderPlotly({
-
-          assign("sd_dat", area_of_interest$species_trends_list[[focal_taxon_name]]$yearly_trend, pos = 1)
-          
-          yearly_plot <- plot_yearly_trends(area_of_interest$species_trends_list[[focal_taxon_name]]$yearly_trend, metric = "reporting_rate")
-
-          yearly_plot
-
-        })
-
-        # Create web map and add basic elements and functionality
-        output$trends_map <- leaflet::renderLeaflet({
-
-          spatiotemporal_trends_data <- area_of_interest$species_trends_list[[focal_taxon_name]]$spatiotemporal_trend
-
-          resolution <- names(spatiotemporal_trends_data)[grep("^h", names(spatiotemporal_trends_data))]
-          spatiotemporal_trends_wide <- spatiotemporal_trends_data %>%
-            dplyr::select(all_of(c("year", resolution, "reporting_rate_sd"))) %>%
-            pivot_wider(names_from = year, values_from = reporting_rate_sd)
-          base_hexes <- h3jsr::cell_to_polygon(spatiotemporal_trends_wide[[resolution]], simple = FALSE)
-          names(base_hexes)[which(names(base_hexes) == "h3_address")] <- resolution
-          spatiotemporal_trends_data <- base_hexes %>%
-            dplyr::left_join(spatiotemporal_trends_wide, by = resolution)
-          # hexes_data
-
-          spatiotemporal_trends_data_pts <- spatiotemporal_trends_data %>% st_centroid()
-
-          m <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE, minZoom = 10)) %>% # Open new leaflet web map
-            leaflet::flyToBounds(area_of_interest$baseline_bbox[[1]],
-                                 area_of_interest$baseline_bbox[[2]],
-                                 area_of_interest$baseline_bbox[[3]],
-                                 area_of_interest$baseline_bbox[[4]],
-                                 options = list(animate = TRUE, duration = 1, easeLinearity = 0.1, noMoveStart = TRUE)
-            ) %>%
-            leaflet::addMapPane("area_of_interest", zIndex = 200) %>%
-            leaflet::addPolygons(
-              data = area_of_interest$boundary,
-              color = grey(.2),
-              opacity = 0.2,
-              fillOpacity = 0.3,
-              weight = 0.5,
-              fill = grey(.2),
-              options = pathOptions(pane = "area_of_interest"),
-              group = "Area of Interest"
-            ) %>%
-            leaflet::addMapPane("basemap1", zIndex = -100) %>% # Add basemap 1
-            leaflet::addProviderTiles(providers$Esri.WorldTerrain, group = "Esri World Terrain", options = list(pathOptions(pane = "basemap1")),
-                                      providerTileOptions(
-                                        updateWhenZooming = FALSE,      # map won't update tiles until zoom is done
-                                        updateWhenIdle = TRUE           # map won't load new tiles when panning
-                                      )) %>%
-            leaflet::addMapPane("basemap2", zIndex = -100) %>% # Add basemap 3
-            leaflet::addProviderTiles(providers$OpenStreetMap, group = "Open Street Map", options = list(pathOptions(pane = "basemap2"))) %>%
-            leaflet::addScaleBar(position = "bottomleft") %>% # Add scale bar
-            leaflet.extras::addResetMapButton() %>% # Add button to reset map bounds
-            leaflet::addLayersControl(baseGroups = c("Esri World Terrain", "Open Street Map"), # Add layers control widget
-                                      options = layersControlOptions(collapsed = TRUE), position = "topleft")
-
-          spatiotemporal_trends_data_pts_df <- spatiotemporal_trends_data_pts %>% dplyr::select(-all_of(names(spatiotemporal_trends_data_pts)[1])) %>% st_set_geometry(NULL)
-
-          spatiotemporal_trends_data_list <- list(
-            below = spatiotemporal_trends_data_pts_df %>% dplyr::mutate(dplyr::across(everything(), ~ ifelse(. < 0, ., NA))),
-            above = spatiotemporal_trends_data_pts_df %>% dplyr::mutate(dplyr::across(everything(), ~ ifelse(. > 0, ., NA)))
+      }
+      
+      focal_taxon_name <- focal_species[input$trends_table_rows_selected]
+      
+      output$species_trends_output <- shiny::renderPlot({
+        
+        assign("sd_dat", area_of_interest$species_trends_list[[focal_taxon_name]]$yearly_trend, pos = 1)
+        
+        yearly_plot <- plot_yearly_trends(area_of_interest$species_trends_list[[focal_taxon_name]]$yearly_trend, metric = "reporting_rate")
+        
+        yearly_plot
+        
+      })
+      
+      # Create web map and add basic elements and functionality
+      output$trends_map <- leaflet::renderLeaflet({
+        
+        spatiotemporal_trends_data <- area_of_interest$species_trends_list[[focal_taxon_name]]$spatiotemporal_trend
+        
+        resolution <- names(spatiotemporal_trends_data)[grep("^h", names(spatiotemporal_trends_data))]
+        spatiotemporal_trends_wide <- spatiotemporal_trends_data %>%
+          dplyr::select(all_of(c("year", resolution, "reporting_rate_sd"))) %>%
+          pivot_wider(names_from = year, values_from = reporting_rate_sd)
+        base_hexes <- h3jsr::cell_to_polygon(spatiotemporal_trends_wide[[resolution]], simple = FALSE)
+        names(base_hexes)[which(names(base_hexes) == "h3_address")] <- resolution
+        spatiotemporal_trends_data <- base_hexes %>%
+          dplyr::left_join(spatiotemporal_trends_wide, by = resolution)
+        # hexes_data
+        
+        spatiotemporal_trends_data_pts <- spatiotemporal_trends_data %>% st_centroid()
+        
+        m <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE, minZoom = 10)) %>% # Open new leaflet web map
+          leaflet::flyToBounds(area_of_interest$baseline_bbox[[1]],
+                               area_of_interest$baseline_bbox[[2]],
+                               area_of_interest$baseline_bbox[[3]],
+                               area_of_interest$baseline_bbox[[4]],
+                               options = list(animate = TRUE, duration = 1, easeLinearity = 0.1, noMoveStart = TRUE)
+          ) %>%
+          leaflet::addMapPane("area_of_interest", zIndex = 200) %>%
+          leaflet::addPolygons(
+            data = area_of_interest$boundary,
+            color = grey(.2),
+            opacity = 0.2,
+            fillOpacity = 0.3,
+            weight = 0.5,
+            fill = grey(.2),
+            options = pathOptions(pane = "area_of_interest"),
+            group = "Area of Interest"
+          ) %>%
+          leaflet::addMapPane("basemap1", zIndex = -100) %>% # Add basemap 1
+          leaflet::addProviderTiles(providers$Esri.WorldTerrain, group = "Esri World Terrain", options = list(pathOptions(pane = "basemap1")),
+                                    providerTileOptions(
+                                      updateWhenZooming = FALSE,      # map won't update tiles until zoom is done
+                                      updateWhenIdle = TRUE           # map won't load new tiles when panning
+                                    )) %>%
+          leaflet::addMapPane("basemap2", zIndex = -100) %>% # Add basemap 3
+          leaflet::addProviderTiles(providers$OpenStreetMap, group = "Open Street Map", options = list(pathOptions(pane = "basemap2"))) %>%
+          leaflet::addScaleBar(position = "bottomleft") %>% # Add scale bar
+          leaflet.extras::addResetMapButton() %>% # Add button to reset map bounds
+          leaflet::addLayersControl(baseGroups = c("Esri World Terrain", "Open Street Map"), # Add layers control widget
+                                    options = layersControlOptions(collapsed = TRUE), position = "topleft")
+        
+        spatiotemporal_trends_data_pts_df <- spatiotemporal_trends_data_pts %>% dplyr::select(-all_of(names(spatiotemporal_trends_data_pts)[1])) %>% st_set_geometry(NULL)
+        
+        spatiotemporal_trends_data_list <- list(
+          below = spatiotemporal_trends_data_pts_df %>% dplyr::mutate(dplyr::across(everything(), ~ ifelse(. < 0, ., NA))),
+          above = spatiotemporal_trends_data_pts_df %>% dplyr::mutate(dplyr::across(everything(), ~ ifelse(. > 0, ., NA)))
+        )
+        
+        # generate_tooltips <- function(dat) {
+        #   dat_location <- dat %>%
+        #     # st_set_geometry(NULL) %>%
+        #     dplyr::select(where(~sum(!is.na(.)) > 0))
+        #   dat_location <- dat_location[, -1]
+        #   dat_location <- dat_location[sort(names(dat_location), decreasing = TRUE)]
+        #   location_popup <- purrr::map_chr(names(dat_location), function(yr){
+        #     paste0(yr, ": ", round(dat_location[[yr]], 3))
+        #   }) %>% paste0(collapse = "<br>")
+        #   # location_popup <- paste0("<div style='max-height: 100px; width: 100px; overflow-y: scroll;'>",
+        #   #                          location_popup,
+        #   #                          "</div>"
+        #   # )
+        #   return(location_popup)
+        # }
+        #
+        # tips_below <- purrr::map(1:nrow(spatiotemporal_trends_data_list$below), function(i){
+        #   generate_tooltips(spatiotemporal_trends_data_list$below[i, ])
+        # })
+        #
+        # tips_above <- purrr::map(1:nrow(spatiotemporal_trends_data_list$above), function(i){
+        #   generate_tooltips(spatiotemporal_trends_data_list$above[i, ])
+        # })
+        
+        spatial_pattern <- area_of_interest$species_trends_list[[focal_taxon_name]]$spatial_pattern
+        spatial_pattern <- spatial_pattern[match(spatiotemporal_trends_data_pts$h5, spatial_pattern$h5), ]
+        count_pal <- colorNumeric("Oranges", spatial_pattern$focal_species_count, na.color = "transparent")
+        
+        m <- m %>%
+          addPolygons(
+            data = spatiotemporal_trends_data,
+            fillOpacity = 0,
+            fillColor = ~count_pal(spatial_pattern$focal_species_count),
+            color = grey(.2),
+            weight = 0.7,
+            opacity = 0.8,
+            popup = leafpop::popupTable(spatial_pattern, row.numbers = FALSE, feature.id = FALSE),
+          ) %>%
+          addMinicharts(
+            lng = st_coordinates(spatiotemporal_trends_data_pts)[, 1],
+            lat = st_coordinates(spatiotemporal_trends_data_pts)[, 2]-0.0001,
+            chartdata = spatiotemporal_trends_data_list$below %>% as.matrix() %>% round(3),
+            type = "bar",
+            width = 120,
+            height = 90,
+            maxValues = 3,
+            colorPalette = "#D95F0E",
+            legend = FALSE,
+            opacity = 1
+            # popup = popupArgs(html = tips_below)
+          )  %>%
+          addMinicharts(
+            lng = st_coordinates(spatiotemporal_trends_data_pts)[, 1],
+            lat = st_coordinates(spatiotemporal_trends_data_pts)[, 2],
+            chartdata = spatiotemporal_trends_data_list$above %>% as.matrix() %>% round(3),
+            type = "bar",
+            width = 120,
+            height = 90,
+            maxValues = 3,
+            colorPalette = "#2C7FB8",
+            legend = FALSE,
+            opacity = 1
+            #popup = popupArgs(html = tips_above)
           )
-
-          # generate_tooltips <- function(dat) {
-          #   dat_location <- dat %>%
-          #     # st_set_geometry(NULL) %>%
-          #     dplyr::select(where(~sum(!is.na(.)) > 0))
-          #   dat_location <- dat_location[, -1]
-          #   dat_location <- dat_location[sort(names(dat_location), decreasing = TRUE)]
-          #   location_popup <- purrr::map_chr(names(dat_location), function(yr){
-          #     paste0(yr, ": ", round(dat_location[[yr]], 3))
-          #   }) %>% paste0(collapse = "<br>")
-          #   # location_popup <- paste0("<div style='max-height: 100px; width: 100px; overflow-y: scroll;'>",
-          #   #                          location_popup,
-          #   #                          "</div>"
-          #   # )
-          #   return(location_popup)
-          # }
-          #
-          # tips_below <- purrr::map(1:nrow(spatiotemporal_trends_data_list$below), function(i){
-          #   generate_tooltips(spatiotemporal_trends_data_list$below[i, ])
-          # })
-          #
-          # tips_above <- purrr::map(1:nrow(spatiotemporal_trends_data_list$above), function(i){
-          #   generate_tooltips(spatiotemporal_trends_data_list$above[i, ])
-          # })
-
-          spatial_pattern <- area_of_interest$species_trends_list[[focal_taxon_name]]$spatial_pattern
-          spatial_pattern <- spatial_pattern[match(spatiotemporal_trends_data_pts$h5, spatial_pattern$h5), ]
-          count_pal <- colorNumeric("Oranges", spatial_pattern$focal_species_count, na.color = "transparent")
-
-          m <- m %>%
-            addPolygons(
-              data = spatiotemporal_trends_data,
-              fillOpacity = 0.2,
-              fillColor = ~count_pal(spatial_pattern$focal_species_count),
-              color = grey(.2),
-              weight = 0.7,
-              opacity = 0.8,
-              popup = leafpop::popupTable(spatial_pattern, row.numbers = FALSE, feature.id = FALSE),
-            ) %>%
-            addMinicharts(
-              lng = st_coordinates(spatiotemporal_trends_data_pts)[, 1],
-              lat = st_coordinates(spatiotemporal_trends_data_pts)[, 2]-0.0001,
-              chartdata = spatiotemporal_trends_data_list$below %>% as.matrix() %>% round(3),
-              type = "bar",
-              width = 120,
-              height = 90,
-              maxValues = 3,
-              colorPalette = "#a50026",
-              legend = FALSE,
-              opacity = 1
-              # popup = popupArgs(html = tips_below)
-            )  %>%
-            addMinicharts(
-              lng = st_coordinates(spatiotemporal_trends_data_pts)[, 1],
-              lat = st_coordinates(spatiotemporal_trends_data_pts)[, 2],
-              chartdata = spatiotemporal_trends_data_list$above %>% as.matrix() %>% round(3),
-              type = "bar",
-              width = 120,
-              height = 90,
-              maxValues = 3,
-              colorPalette = "#313695",
-              legend = FALSE,
-              opacity = 1
-              #popup = popupArgs(html = tips_above)
-            )
-
-          m
-
-        })
-
-        output$association_table <- DT::renderDataTable({
-
-        focal_associated_species <- get_associated_species(focal_species = focal_taxon_name, analysis_records = area_of_interest$gbif_data_filtered, num_species = 50)
-
+        
+        m
+        
+      })
+      
+      output$association_table <- DT::renderDataTable({
+        
+        focal_associated_species <- get_associated_species(focal_species = focal_taxon_name, analysis_records = area_of_interest$gbif_data_filtered, trends_table = area_of_interest$trends_table)
+        
         focal_associated_species_table <- area_of_interest$trends_table %>%
           dplyr::ungroup() %>%
           dplyr::filter(species %in% focal_associated_species$species) %>%
           dplyr::left_join(focal_associated_species, by = "species") %>%
           dplyr::select(species, kingdom, shared_visits, number_records, number_years_recorded) %>%
           dplyr::arrange(desc(shared_visits))
-
+        
         focal_associated_species_table %>%
           dplyr::left_join(area_of_interest$gbif_data %>% sf::st_set_geometry(NULL) %>% dplyr::filter(species %in% focal_associated_species_table$species) %>% dplyr::select(species, specieskey) %>% dplyr::distinct(.keep_all = TRUE), by = "species") %>%
           dplyr::mutate(
@@ -1659,20 +2178,20 @@ function(input, output, session) {
             "Number of records" = "number_records",
             "Number of years recorded" = "number_years_recorded"
           ) %>%
-        datatable(class="hover compact",
-                  options = list(dom = 'tp',
-                                 pageLength = 10,
-                                 language = list(emptyTable = ''),
-                                 pagingType = "simple",
-                                 scrollX = TRUE,
-                                 scrollY = TRUE,
-                                 autoWidth = FALSE
-        ),
-        selection = "none",
-        escape = FALSE,
-        rownames = FALSE
-        )
-
+          datatable(class="hover compact",
+                    options = list(dom = 'tp',
+                                   pageLength = 20,
+                                   language = list(emptyTable = ''),
+                                   pagingType = "simple",
+                                   scrollX = TRUE,
+                                   scrollY = TRUE,
+                                   autoWidth = FALSE
+                    ),
+                    selection = "none",
+                    escape = FALSE,
+                    rownames = FALSE
+          )
+        
         #
         #   coords <- as.data.frame(area_of_interest$species_associations$loadings)
         #   rownames(coords) <- area_of_interest$species_associations$obj$fitted.values %>% colnames()
@@ -1750,53 +2269,88 @@ function(input, output, session) {
         #
         #   m
         #
-
-        })
-
-        # assign("area_of_interest",
-        #        list(
-        #          boundary = area_of_interest$boundary,
-        #          baseline = area_of_interest$baseline,
-        #          bbox = area_of_interest$bbox,
-        #          baseline_bbox = area_of_interest$baseline_bbox,
-        #          area = area_of_interest$area,
-        #          hexes = area_of_interest$hexes,
-        #          gbif_data = area_of_interest$gbif_data,
-        #          gbif_data_filtered = area_of_interest$gbif_data_filtered,
-        #          species_associations = area_of_interest$species_associations,
-        #          species_associations_matrix = area_of_interest$species_associations_matrix,
-        #          points_selected = area_of_interest$points_selected,
-        #          metric_count_hexes = area_of_interest$metric_count_hexes,
-        #          metric_table = area_of_interest$metric_table,
-        #          records_table = area_of_interest$records_table,
-        #          species_table = area_of_interest$species_table,
-        #          observers_table = area_of_interest$observers_table,
-        #          visits_table = area_of_interest$visits_table,
-        #          trends_table = area_of_interest$trends_table,
-        #          species_trends_list = area_of_interest$species_trends_list,
-        #          biggest_movers_table = area_of_interest$biggest_movers_table,
-        #          focal_species_trends_table = area_of_interest$focal_species_trends_table
-        #        ),
-        #        pos = 1
-        # )
-      }
-
+        
+      })
+      
+    }
+    
   })
-
+  
   output$metric_total <- renderUI({
-
+    
     span(style = "display-inline: block; padding-top: 0;",
          p(strong(req(format(round(nrow(area_of_interest$metric_table), 1), big.mark=",", scientific = FALSE)), style = "font-size: 20px; color: #347AB7; padding-right: 20px; display-inline: block; float:left;")),
     )
-
+    
+  })
+  
+  area_of_interest$report_path <- NULL
+  
+  observeEvent(input$pages, {
+    
+    if (input$pages == "INSIGHTS"){
+      
+      # if (input$select_map_aoi %in% gsub("_data_full.rds", "", aoi_available_outputs)){ 
+      # if (input$select_map_aoi %in% gsub("_data_full.rds", "", list.files("data/outputs"))){
+      if (input$select_map_aoi %in% gsub("_data_full.rds", "", aoi_available_outputs)){ 
+        
+        # aoi <- readRDS(paste0("data/outputs/", input$select_map_aoi, "_data_full.rds"))
+        
+        aoi <- read_github_rds(
+          owner = "elimia-analytics",
+          repo  = "california-biodiversity-trends-engine",
+          path  = "data/outputs",
+          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data_full.rds"))
+        )
+        
+        aoi$rf$forest$independent.variable.names <- gsub(" |-", "_", aoi$rf$forest$independent.variable.names)
+        names(aoi$rf_data) <- gsub(" |-", "_", names(aoi$rf_data))
+        aoi$major_habitats <- gsub(" ", "_", aoi$major_habitats)
+        
+        outfile <- paste0(
+          "www/reports/report_",
+          gsub("-|/", "_", aoi$boundary$aoi_name),
+          ".html"
+        )
+        
+        # aoi <- reactiveValuesToList(area_of_interest)
+        
+        rmarkdown::render(
+          "insights_report.Rmd",
+          output_file = outfile,
+          params = list(
+            area_of_interest = aoi,
+            report_title = paste0("Biodiversity Insights Report - ", area_of_interest$boundary$aoi_name[1])
+          ),
+          envir = new.env(parent = globalenv()),
+          quiet = TRUE
+        )
+        
+        area_of_interest$report_path <- 
+          paste0(
+            "reports/report_",
+            gsub("-|/", "_", aoi$boundary$aoi_name),
+            ".html"
+          )
+        
+      }
+    }
+    
+  })
+  
+  output$insights_report_iframe <- renderUI({
+    
+    req(area_of_interest$report_path)
+    
+    tags$iframe(
+      src = area_of_interest$report_path,
+      style = "
+      width: 95vw !important;
+      height: 100vh !important;
+      border:none;
+    "
+    )
+    
   })
   
 }
-
-# OVERALL:
-
-# DATA:
-
-# TRENDS: 
-# Improve taxon filtering
-# Improve estimates of upward/downward trend

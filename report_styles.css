@@ -1,0 +1,220 @@
+/* Google fonts */
+@import url('https://fonts.googleapis.com/css2?family=Roboto&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo&display=swap');
+
+
+/* Entire document */
+body {
+
+  font-family: 'Roboto', sans-serif;
+
+  font-size: 13px;
+
+  line-height: 1.5;
+
+  color: #222222;
+
+  background-color: #ffffff;
+
+  max-width: 1050px;
+
+  margin: auto;
+
+  padding-left: 60px;
+
+  padding-right: 60px;
+
+}
+
+
+/* Main title */
+
+h1.title {
+
+  font-family: "Archivo";
+
+  font-size: 18px;
+
+  color: #1F417D;
+
+  margin-top: 20px;
+
+  margin-bottom: 10px;
+
+}
+
+
+/* Subtitle */
+
+.subtitle {
+
+  color: #666666;
+
+  font-size: 15px;
+
+  margin-bottom: 20px;
+
+}
+
+
+/* Major sections */
+
+h1 {
+
+  font-family: 'Roboto', sans-serif;
+
+  color: #1F417D;
+
+  font-size: 16px;
+
+  margin-top: 20px;
+
+  margin-bottom: 15px;
+
+  border-bottom: 3px solid #4275D0;
+
+  padding-bottom: 12px;
+
+}
+
+
+/* Subsections */
+
+h2 {
+
+  font-family: 'Roboto', sans-serif;
+
+  color: #1F417D;
+
+  font-size: 14px;
+
+  margin-top: 20px;
+
+  margin-bottom: 15px;
+
+}
+
+
+/* Third level */
+
+h3 {
+
+  font-family: 'Roboto', sans-serif;
+
+  color: #1F417D;
+
+}
+
+
+/* Paragraph spacing */
+
+p {
+
+  margin-bottom: 10px;
+
+}
+
+
+/* Horizontal rules */
+
+hr {
+
+  border-top: 1px solid #dddddd;
+
+  margin-top: 70px;
+
+  margin-bottom: 70px;
+
+}
+
+
+/* Figures */
+
+.figure {
+
+  background: #fafafa;
+
+  border-left: 6px solid #4275D0;
+
+  padding: 25px;
+
+  margin-top: 35px;
+
+  margin-bottom: 50px;
+
+  box-shadow: 0 2px 6px rgba(0,0,0,.08);
+
+}
+
+
+/* Figure captions */
+
+.caption {
+
+  color: #666666;
+
+  font-style: italic;
+
+  font-size: 13px;
+
+}
+
+
+/* Tables */
+
+table {
+
+  width: 100%;
+
+}
+
+
+/* Blockquotes */
+
+blockquote {
+
+  background: #f7f7f7;
+
+  border-left: 5px solid #4275D0;
+
+  padding: 20px;
+
+}
+
+
+/* Code chunks */
+
+pre {
+
+  background: #fafafa;
+
+  border-radius: 8px;
+
+  padding: 15px;
+
+}
+
+
+/* Page breaks when rendering to PDF */
+
+.page-break {
+
+  page-break-before: always;
+
+}
+
+.figure-panel {
+
+    background: #fafafa;
+
+    padding: 25px;
+
+    border-radius: 12px;
+
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+
+    margin-top: 20px;
+
+    margin-bottom: 20px;
+
+}

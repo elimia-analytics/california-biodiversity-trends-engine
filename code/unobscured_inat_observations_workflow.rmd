@@ -1,0 +1,328 @@
+---
+title: "California Biodiversity Trends Engine: Dealing with Unobscured iNaturalist observations"
+author: "elimia"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    theme: flatly
+self_contained: true
+---
+
+```{r setup, message = FALSE, warning = FALSE, include = FALSE}
+knitr::opts_chunk$set(include = FALSE)
+## Identify required package names
+### CRAN packages
+app_libraries <- c("tidyverse", ### data manipulation
+                   "shiny", "shinyjs", "shinyWidgets", "shinydashboard", "shinycssloaders", "shinyBS", "shinybusy",  ### shiny
+                   "sf", "terra", "leaflet", "tmap", "leaflet.extras", "leaflet.minicharts", "leafpm", "h3jsr", "esri2sf", "leafgl",   ### spatial
+                   "plotly", "htmltools", "htmlwidgets", "sortable", "DT", "flexdashboard", "dygraphs", "bslib",   ### interactive
+                   "ranger", "pdp", ### stats
+                   "natserv", "duckdbfs", "picante", "ecoCopula", "mvabund", ### data
+                   "units", "memoise", "glue", "httr", "jsonlite", "future", "furrr"
+)
+invisible(lapply(app_libraries, library, character.only = TRUE))
+
+### Source custom functions
+source("~/Dropbox/elimia/code/apps/biodiversity-trends-engine/biodiversity_trends_engine_functions.R")
+# species_whr_relationships <- readRDS("species_whr_relationships.rds")
+
+## Update tmap mode
+tmap_mode("view")
+```
+
+```{r load-boundary, message=FALSE, warning=FALSE, include=FALSE}
+# Load area of interest outputs
+AOI <- readRDS("~/Dropbox/elimia/code/apps/biodiversity-trends-engine/data/outputs-v1/One Tam Area of Interest_data.rds")$boundary
+# Create list object to store all outputs for area of interest
+area_of_interest <- list(
+  boundary = AOI,
+  baseline = NULL,
+  bbox = NULL,
+  area = NULL,
+  gbif_data = NULL
+)
+# Extract boundary bounding box
+area_of_interest$bbox <- area_of_interest$boundary %>% sf::st_bbox()
+# Get boundary area in km2
+area_of_interest$area <- area_of_interest$boundary %>% sf::st_area() %>% units::set_units(km^2) %>% as.numeric()
+# Identify baseline place contingent on AOI area
+## If AOI area is lower than 100 km2, baseline equals all watersheds overlapping AOI buffered by 1km
+if (area_of_interest$area < 100){
+  area_of_interest$baseline <- arcpullr::get_layer_by_poly("https://services2.arcgis.com/Uq9r85Potqm3MfRV/arcgis/rest/services/NHD_WBD_HUC10_Watersheds/FeatureServer/0", area_of_interest$boundary %>% sf::st_buffer(1000), sp_rel = "intersects") %>%
+    sf::st_union() %>%
+    sf::st_as_sf() %>%
+    sf::st_transform(4326)
+}
+#### If AOI area is higher or equal to 100km2 but lower than 200 km2, baseline equals all watersheds overlapping AOI
+if (area_of_interest$area >= 100 & area_of_interest$area < 200){
+  area_of_interest$baseline <- arcpullr::get_layer_by_poly("https://services2.arcgis.com/Uq9r85Potqm3MfRV/arcgis/rest/services/NHD_WBD_HUC10_Watersheds/FeatureServer/0", area_of_interest$boundary, sp_rel = "intersects") %>%
+    sf::st_union() %>%
+    sf::st_as_sf() %>%
+    sf::st_transform(4326)
+}
+#### If AOI area is higher than 200 km2, baseline equals AOI
+if (area_of_interest$area >= 200){
+  area_of_interest$baseline <- area_of_interest$boundary
+}
+```
+
+```{r download-gbif-data, message=FALSE, warning=FALSE, include=FALSE}
+# Download and filter relevant GBIF parquet files
+area_of_interest$gbif_data <- get_gbif_data(area_of_interest$baseline)
+# Process and clean up gbif data
+area_of_interest$gbif_data <- area_of_interest$gbif_data %>%
+  dplyr::mutate(
+    recordedby = as.character(recordedby), # Turn recordedby to character vector
+    observationdate = paste0(year, ifelse(nchar(month) == 1, paste0("0", month), month), ifelse(nchar(day) == 1, paste0("0", day), day))
+  )
+area_of_interest$gbif_data <- area_of_interest$gbif_data %>%
+  dplyr::mutate(observationdate = gsub("NA", "", observationdate))
+# Identify individual visits
+area_of_interest$gbif_data <- area_of_interest$gbif_data %>%
+  dplyr::mutate(recordedby = ifelse(recordedby == "character(0)", "unknown", recordedby)) %>%
+  dplyr::mutate(visitID = paste0(recordedby, "_", observationdate, "_", h7, "_", datasetkey))
+# Select only necessary fields
+area_of_interest$gbif_data <- area_of_interest$gbif_data %>%
+  dplyr::select(-catalognumber, -recordnumber, -license, -rightsholder, -typestatus, -establishmentmeans, -lastinterpreted, -mediatype, -issue)
+```
+
+```{r load-unobscured-inat, message=FALSE, warning=FALSE, include=FALSE}
+# Load unobscured iNat observations for sensitive species
+unobscured_inat_observations <- read_csv("~/Dropbox/elimia/code/apps/biodiversity-trends-engine/data/iNat_Sensitive_for_Trends_Engine_upto_2025-06-30.csv") %>% 
+dplyr::mutate(
+  longitude = decimalLongitude,
+  latitude = decimalLatitude
+) %>% 
+  st_as_sf(
+    coords = c("longitude", "latitude"),
+    crs = 4326
+  )
+# Identify iNat observations intersecting the baseline area of interest
+unobscured_inat_observations_intersecting <- unobscured_inat_observations[which(sf::st_intersects(unobscured_inat_observations, area_of_interest$boundary, sparse = FALSE) == TRUE), ]
+```
+
+# Unobscured iNaturalist observations differences maps
+
+```{r identify-unobscuration-effects, include = FALSE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Obscured Sensitive Taxon observations initially included in boundary area of interest
+obscured_sensitive_observations_from_gbif <- area_of_interest$gbif_data %>% 
+  dplyr::filter(occurrenceid %in% unobscured_inat_observations$occurrenceID)
+
+# Unobscured Sensitive Taxon observations initially included in boundary area of interest
+unobscured_sensitive_observations_from_gbif <- unobscured_inat_observations %>% 
+  dplyr::filter(occurrenceID %in% area_of_interest$gbif_data$occurrenceid)
+
+# Unobscured Sensitive Taxon observations newly included in boundary area of interest
+unobscured_sensitive_observations_new_overlap <- unobscured_inat_observations_intersecting %>% 
+  dplyr::filter(!(occurrenceID %in% unobscured_sensitive_observations_from_gbif$occurrenceID))
+
+# Unobscured Sensitive Taxon observations newly excluded from boundary area of interest
+unobscured_sensitive_observations_new_difference <- obscured_sensitive_observations_from_gbif %>% 
+  dplyr::filter(!(occurrenceid %in% unobscured_inat_observations_intersecting$occurrenceID))
+```
+
+```{r sensitive-obscured-inat-map, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+m1 <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE)) %>% 
+  leaflet::addProviderTiles(providers$Esri.WorldStreetMap) %>%
+  leaflet::addPolygons(
+    data = area_of_interest$baseline, 
+    color = "#333333", 
+    opacity = 0.9,
+    weight = 1, 
+    fill = FALSE
+    ) %>% 
+  leafgl::addGlPoints(
+    data = obscured_sensitive_observations_from_gbif, 
+    fillColor = "blue", 
+    radius = 5, 
+    fillOpacity = 0.7
+  ) %>% 
+    addControl(
+    html = paste0("<div style='
+              background-color: rgba(255,255,255,0.8); 
+              padding: 10px; 
+              border-radius: 5px;
+              box-shadow: 0 0 15px rgba(0,0,0,0.2);
+              font-family: Arial, sans-serif;
+              font-size: 16px;
+              font-weight: bold;'>
+              Sensitive Taxon observations initially included: ", nrow(obscured_sensitive_observations_from_gbif),
+            "</div>"),
+        position = "topright"
+  )
+m1
+```
+
+```{r unobscured-internal-moves-map, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+internal_moves <- unobscured_inat_observations_intersecting %>% 
+  dplyr::filter(
+    occurrenceID %in% obscured_sensitive_observations_from_gbif$occurrenceid
+  )
+
+flow_data <- data.frame(
+  lon_start = obscured_sensitive_observations_from_gbif %>% dplyr::filter(occurrenceid %in% internal_moves$occurrenceID) %>% dplyr::pull(decimallongitude),
+  lat_start = obscured_sensitive_observations_from_gbif %>% dplyr::filter(occurrenceid %in% internal_moves$occurrenceID) %>% dplyr::pull(decimallatitude),
+  lon_end   = internal_moves$decimalLongitude,
+  lat_end   = internal_moves$decimalLatitude,
+  volume    = 1
+)
+
+m2 <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE)) %>% 
+  leaflet::addProviderTiles(providers$Esri.WorldStreetMap) %>%
+  leaflet::addPolygons(
+    data = area_of_interest$baseline, 
+    color = "#333333", 
+    opacity = 0.9,
+    weight = 1, 
+    fill = FALSE
+    ) %>% 
+  leafgl::addGlPoints(
+    data = obscured_sensitive_observations_from_gbif %>% dplyr::filter(occurrenceid %in% internal_moves$occurrenceID), 
+    fillColor = "blue", 
+    radius = 5, 
+    fillOpacity = 0.7
+  ) %>% 
+    leafgl::addGlPoints(
+    data = internal_moves, 
+    fillColor = "red", 
+    radius = 5, 
+    fillOpacity = 0.7
+  ) %>% 
+  leaflet.minicharts::addFlows(
+    lng0 = flow_data$lon_start, lat0 = flow_data$lat_start,
+    lng1 = flow_data$lon_end,   lat1 = flow_data$lat_end,
+    flow = flow_data$volume,
+    color = grey(.5), 
+    opacity = 0.3, maxThickness = 1
+  ) %>% 
+    addControl(
+    html = paste0("<div style='
+              background-color: rgba(255,255,255,0.8); 
+              padding: 10px; 
+              border-radius: 5px;
+              box-shadow: 0 0 15px rgba(0,0,0,0.2);
+              font-family: Arial, sans-serif;
+              font-size: 16px;
+              font-weight: bold;'>
+              Number of internal moves: ", nrow(internal_moves),
+            "</div>"),
+    position = "topright" # Options: "topleft", "topright", "bottomleft", "bottomright"
+  )
+m2
+```
+
+```{r unobscured-moves-outside-map, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+moves_to_exterior <- obscured_sensitive_observations_from_gbif %>% 
+  dplyr::filter(!(occurrenceid %in% unobscured_inat_observations_intersecting$occurrenceID))
+
+flow_data <- data.frame(
+  lon_start = moves_to_exterior %>% dplyr::pull(decimallongitude),
+  lat_start = moves_to_exterior %>% dplyr::pull(decimallatitude),
+  lon_end   = unobscured_inat_observations %>% dplyr::filter(occurrenceID %in% moves_to_exterior$occurrenceid) %>% dplyr::pull(decimalLongitude),
+  lat_end   = unobscured_inat_observations %>% dplyr::filter(occurrenceID %in% moves_to_exterior$occurrenceid) %>% dplyr::pull(decimalLatitude),
+  volume    = 1
+)
+
+m2 <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE)) %>% 
+  leaflet::addProviderTiles(providers$Esri.WorldStreetMap) %>%
+  leaflet::addPolygons(
+    data = area_of_interest$baseline, 
+    color = "#333333", 
+    opacity = 0.9,
+    weight = 1, 
+    fill = FALSE
+    ) %>% 
+  leafgl::addGlPoints(
+    data = moves_to_exterior, 
+    fillColor = "blue", 
+    radius = 5, 
+    fillOpacity = 0.7
+  ) %>% 
+    leafgl::addGlPoints(
+    data = unobscured_inat_observations %>% dplyr::filter(occurrenceID %in% moves_to_exterior$occurrenceid), 
+    fillColor = "red", 
+    radius = 5, 
+    fillOpacity = 0.7
+  ) %>% 
+  leaflet.minicharts::addFlows(
+    lng0 = flow_data$lon_start, lat0 = flow_data$lat_start,
+    lng1 = flow_data$lon_end,   lat1 = flow_data$lat_end,
+    flow = flow_data$volume,
+    color = grey(.7), 
+    opacity = 0.3,
+    maxThickness = 2
+  ) %>% 
+      addControl(
+    html = paste0("<div style='
+              background-color: rgba(255,255,255,0.8); 
+              padding: 10px; 
+              border-radius: 5px;
+              box-shadow: 0 0 15px rgba(0,0,0,0.2);
+              font-family: Arial, sans-serif;
+              font-size: 16px;
+              font-weight: bold;'>
+              Number of moves to exterior: ", nrow(moves_to_exterior),
+            "</div>"),
+    position = "topright" # Options: "topleft", "topright", "bottomleft", "bottomright"
+  )
+m2
+```
+
+```{r unobscured-moves-outside-table, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+moves_to_exterior_species_summary <- moves_to_exterior$species %>% table() %>% stack() %>% dplyr::rename(lost_observations = values, species = ind) %>% dplyr::select(species, lost_observations) %>% dplyr::left_join(area_of_interest$gbif_data$species %>% table() %>% stack() %>% dplyr::rename(previous_total_observations = values, species = ind) %>% dplyr::select(species, previous_total_observations), by = "species") %>% 
+  dplyr::mutate(
+  percent_lost_observations = 100*(lost_observations/previous_total_observations),
+moves_to_exterior_species_summary,
+new_observations_total = previous_total_observations-lost_observations,
+no_longer_meets_trends_requirements = ifelse(previous_total_observations > 100 & new_observations_total < 100, TRUE, FALSE)
+) %>% 
+  as.data.frame()
+moves_to_exterior_species_summary
+```
+
+```{r unobscured-moves-inside-map, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+moves_to_interior <- unobscured_inat_observations_intersecting %>% 
+  dplyr::filter(!(occurrenceID %in% unobscured_sensitive_observations_from_gbif$occurrenceID))
+
+m3 <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE)) %>% 
+  leaflet::addProviderTiles(providers$Esri.WorldStreetMap) %>%
+  leaflet::addPolygons(
+    data = area_of_interest$baseline, 
+    color = "#333333", 
+    opacity = 0.9,
+    weight = 1, 
+    fill = FALSE
+    ) %>% 
+    leafgl::addGlPoints(
+    data = moves_to_interior, 
+    fillColor = "red", 
+    radius = 5, 
+    fillOpacity = 0.7
+  ) %>% 
+      addControl(
+    html = paste0("<div style='
+              background-color: rgba(255,255,255,0.8); 
+              padding: 10px; 
+              border-radius: 5px;
+              box-shadow: 0 0 15px rgba(0,0,0,0.2);
+              font-family: Arial, sans-serif;
+              font-size: 16px;
+              font-weight: bold;'>
+              Number of moves to interior: ", nrow(moves_to_interior),
+            "</div>"),
+    position = "topright" # Options: "topleft", "topright", "bottomleft", "bottomright"
+  )
+m3
+```
+
+```{r unobscured-moves-inside-table, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Download inat data for moves to interior
+ moves_to_interior_species <- purrr::map(moves_to_interior$id, purrr::safely(function(inat_id){
+   rinat::get_inat_obs_id(inat_id)
+   }))
+moves_to_interior_species_summary <- moves_to_interior$species %>% table() %>% stack() %>% dplyr::rename(gained_observations = values, species = ind) %>% dplyr::select(species, gained_observations) %>% dplyr::left_join(area_of_interest$gbif_data$species %>% table() %>% stack() %>% dplyr::rename(previous_total_observations = values, species = ind) %>% dplyr::select(species, previous_total_observations), by = "species") %>% dplyr::mutate(percent_gained_observations = 100*(gained_observations/previous_total_observations)) %>% as.data.frame()
+moves_to_exterior_species_summary
+```

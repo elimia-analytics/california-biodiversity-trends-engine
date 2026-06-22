@@ -1,0 +1,475 @@
+---
+title: "`r params$report_title`"
+
+output:
+  bookdown::html_document2:
+    css: report_styles.css
+    number_sections: true
+    toc: false
+    fig_caption: true
+    self_contained: true
+
+params:
+  area_of_interest: area_of_interest
+  report_title: report_title
+---
+
+```{r setup, message = FALSE, warning = FALSE, include = FALSE}
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 3,
+  fig.height = 2,
+  dpi = 300
+)
+
+library(tidyverse)
+library(sf)
+library(terra)
+library(tmap)
+library(gt)
+library(patchwork)
+library(cowplot)
+library(bslib)
+library(ranger)
+library(pdp)
+library(leaflet)
+
+source("biodiversity_trends_engine_functions.R")
+
+tmap_mode("plot")
+
+area_of_interest <- params$area_of_interest
+
+library(gt)
+
+theme_report_table <- function(tbl){
+
+  tbl |>
+
+    opt_table_font(
+      font = list(
+        gt::google_font("Source Sans Pro")
+      )
+    ) |>
+
+    tab_options(
+
+      table.font.size = 13,
+
+      heading.title.font.size = 18,
+
+      heading.subtitle.font.size = 14,
+
+      table.border.top.color = "#1F417D",
+
+      table.border.bottom.color = "#1F417D",
+
+      heading.border.bottom.color = "#4275D0",
+
+      column_labels.border.bottom.color = "#4275D0",
+
+      data_row.padding = px(5)
+
+    ) |>
+
+    opt_row_striping() |>
+
+    tab_style(
+      style = cell_text(
+        weight = "bold",
+        color = "#1F417D"
+      ),
+      locations = cells_column_labels()
+    )
+
+}
+```
+
+```{r extract-boundary-data, message=FALSE, warning=FALSE, include=FALSE}
+# Filter boundary gbif data
+area_of_interest$gbif_data_boundary <- area_of_interest$gbif_data[which(sf::st_intersects(area_of_interest$gbif_data, area_of_interest$boundary, sparse = FALSE)), ]
+```
+
+`r format(Sys.Date(), "%B %Y")`
+
+# Key Insights
+
+- Recording effort is unevenly distributed across habitats.
+- Several habitat types remain underrepresented.
+- Sampling coldspots reveal priority regions for future surveys.
+- Patterns differ substantially among taxonomic groups.
+- Habitat associations explain a significant component of trend variation.
+
+# Underrepresented habitats
+
+Underrepresented habitats refer to habitats which have been visited less frequently than would be expected given their prevalence across the conservation area of interest.
+
+```{r underrepresented-habitats, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+area_of_interest$underrepresented_habitats_df |>
+
+  gt() |>
+
+  fmt_percent(
+    columns = where(is.numeric),
+    decimals = 1
+  ) |>
+
+  theme_report_table()
+```
+
+# Sampling coldspots map
+
+Sampling coldspots are locations across the conservation area of interest where undersampled habitats coincide with low overall rates of recording.
+
+<div class="figure-panel">
+
+```{r coldspots-map, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#### Where are the most underrepresented and undersampled habitats?
+sampling_coldspots <- terra::rast(paste0("data/outputs/", area_of_interest$boundary$aoi_name[1], "_sampling_coldspots.tif"))
+m <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE)) %>% 
+  leaflet::addProviderTiles(providers$Esri.WorldStreetMap) %>%
+  leaflet::addRasterImage(
+    sampling_coldspots, 
+    colors = "#CD0600",
+    opacity = 0.9
+  ) %>% 
+  leaflet::addLegend(
+    position = "bottomleft", 
+    colors = "#CD0600", 
+    labels = "Sampling Coldspots \n (Underrepresented Habitats in Undersampled Areas"
+  )
+
+m
+```
+</div>
+
+# Species associated with undersampled habitats
+
+These are the 20 species which have most frequently been recorded in undersampled habitats but remain data deficient overall.
+
+```{r coldspots-species, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+##### What species are associated with those habitats?
+area_of_interest$underrepresented_habitats_species |>
+  
+  dplyr::select(-phylum, - genus) |>
+  
+  head(20) |>
+
+  gt() |>
+
+  cols_label(
+
+    number_records = "Number of records",
+
+    number_years_recorded = "Number of years recorded"
+
+  ) |>
+
+  theme_report_table()
+```
+
+# Under-represented/over-represented taxa
+
+Representation refers to the degree of available information for a taxon given how frequently it occurs across the conservation area of interest. We estimate representation by assuming that the number of species ever recorded within a higher taxon is proportional to the likelihood of encountering them across the conservation area of interest. Under-represented and over-represented taxa are those which are recorded relatively less or more than expected given the number of species they include, respectively.
+
+```{r undersampled-taxa, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+# Records representation
+df <- area_of_interest$underrepresented_taxa %>% as.data.frame()
+
+print(class(df))
+print(names(df))
+str(df)
+
+p1 <- ggplot(df, aes(group = taxon, x = proportion_species, y = proportion_records, fill = records_representation)) +
+    ggplot2::geom_abline(intercept = 0, slope = 1) +
+  geom_point(size = 2.5, colour = grey(.2), stroke = 0.2) +
+     theme_linedraw() +
+     theme(legend.position = "none",
+           panel.grid = element_line(color = grey(.8)),
+           axis.title = element_text(size = 9),
+           axis.text = element_text(size = 8)
+     ) +
+  ggplot2::xlab("Proportion of all species in taxon") +
+  ggplot2::ylab("Proportion of all records for taxon")
+
+# Low sample size species representation
+p2 <- ggplot(df, aes(group = taxon, x = proportion_low_sample_size_species, y = proportion_species, fill = low_sample_size_representation)) +
+    ggplot2::geom_abline(intercept = 0, slope = 1) +
+  geom_point(size = 2.5, colour = grey(.2), stroke = 0.2) +
+     theme_linedraw() +
+     theme(legend.position = "none",
+           panel.grid = element_line(color = grey(.8)),
+           axis.title = element_text(size = 9),
+           axis.text = element_text(size = 8)
+     ) +
+  ggplot2::xlab("Proportion of all species in taxon") +
+  ggplot2::ylab("Proportion of all undersampled species in taxon")
+
+p <- subplot(p1, p2, nrows = 1, shareX = FALSE, titleX = TRUE, titleY = TRUE, margin = 0.05, which_layout = 1)
+
+gg <- plotly::plotly_build(p) %>%
+    plotly::config(displayModeBar = FALSE) %>%
+    plotly::layout(# plot_bgcolor  = "rgba(0, 0, 0, 0)",
+      paper_bgcolor = "rgba(0, 0, 0, 0)",
+      font = list(family = "Helvetica", size = 14),
+      xaxis = list(titlefont = list(size = 13),
+                   tickfont = list(size = 13),
+                   gridcolor = grey(.7)),
+      yaxis = list(titlefont = list(size = 13),
+                   tickfont = list(size = 13),
+                   gridcolor = grey(.7))
+    )
+gg
+```
+
+# Average trends across taxa
+
+These are the yearly trends in reporting rate anomaly averaged across all species in each major taxon for which a trend could be estimated. Values higher or lower than 0 represent instances of over-reporting or under-reporting across all species in the taxon in a given year.
+
+```{r taxon-summed-trends, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.height=7, fig.width=12, out.width='100%'}
+taxon_list <- area_of_interest$major_taxon_trends_summed[c("Aves", "Mammalia", "Squamata", "Amphibia", "Insecta")]
+df <- purrr::map(1:length(taxon_list), function(t){
+  dat <- taxon_list[[t]] %>% 
+      dplyr::select(year, mean_metric) %>%  
+      dplyr::mutate(taxon = names(taxon_list)[t])
+  }
+) %>% 
+  bind_rows() %>% 
+  as.data.frame()
+p3 <- ggplot(df,
+             aes(year, mean_metric, colour = taxon)) +
+  geom_hline(yintercept = 0,
+             colour = "black",
+             linewidth = 1) +
+  geom_line(linewidth = .7) +
+  facet_wrap(
+    vars(taxon),
+    scales = "free_y",
+    ncol = 3
+  ) +
+  theme_linedraw() +
+  theme(
+    legend.position = "none",
+    panel.grid = element_line(color = grey(.8)),
+    strip.text = element_text(size = 16),
+    axis.text.y = element_text(size = 15),
+    axis.text.x = element_text(size = 15, angle = 45, hjust = 1),
+    axis.title = element_text(size = 15)
+  ) +
+  labs(
+    x = NULL,
+    y = "Reporting rate anomaly"
+  )
+p3
+
+# gg <- plotly::plotly_build(p3) %>%
+#   plotly::config(displayModeBar = FALSE) %>%
+#   plotly::layout(# plot_bgcolor  = "rgba(0, 0, 0, 0)",
+#     paper_bgcolor = "rgba(0, 0, 0, 0)",
+#     font = list(family = "Helvetica", size = 14),
+#     xaxis = list(titlefont = list(size = 13),
+#                  tickfont = list(size = 13),
+#                  gridcolor = grey(.7)),
+#     yaxis = list(titlefont = list(size = 13),
+#                  tickfont = list(size = 13),
+#                  gridcolor = grey(.7))
+#   )
+# 
+# gg
+```
+
+# Average trends across habitats
+
+These are the yearly trends in reporting rate anomaly averaged across all species with an estimated trend associated with each habitat. Values higher or lower than 0 represent instances of over-reporting or under-reporting across species associated with that habitat in a given year.
+
+```{r habitat-summed-trends, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.height=7, fig.width=12, out.width='100%'}
+df <- purrr::map(1:length(area_of_interest$major_habitat_trends), function(t){
+  dat <- area_of_interest$major_habitat_trends[[t]] %>% 
+      dplyr::select(year, mean_metric) %>%  
+      dplyr::mutate(taxon = names(area_of_interest$major_habitat_trends)[t])
+  }
+) %>% 
+  bind_rows() %>% 
+  as.data.frame()
+p4 <- ggplot(df, aes(x=year, y = mean_metric, colour = taxon)) +
+    geom_hline(yintercept = 0, colour = "black", size = 1) +
+    # geom_hline(yintercept = 1.96, colour = grey(.5), size = .5) +
+    # geom_hline(yintercept = -1.96, colour = grey(.5), size = .5) +
+    geom_line(size = 0.7, alpha = 1) +
+  facet_wrap(
+    vars(taxon),
+    scales = "free_y",
+    ncol = 3
+  ) +
+  theme_linedraw() +
+  theme(
+    legend.position = "none",
+    panel.grid = element_line(color = grey(.8)),
+    strip.text = element_text(size = 16),
+    axis.text.y = element_text(size = 15),
+    axis.text.x = element_text(size = 15, angle = 45, hjust = 1),
+    axis.title = element_text(size = 15)
+  ) +
+  labs(
+    x = NULL,
+    y = "Reporting rate anomaly"
+  )
+
+p4
+# 
+#   gg <- plotly::plotly_build(p4) %>%
+#     plotly::config(displayModeBar = FALSE) %>%
+#     plotly::layout(# plot_bgcolor  = "rgba(0, 0, 0, 0)",
+#       paper_bgcolor = "rgba(0, 0, 0, 0)",
+#       font = list(family = "Helvetica", size = 14),
+#       xaxis = list(titlefont = list(size = 13),
+#                    tickfont = list(size = 13),
+#                    gridcolor = grey(.7)),
+#       yaxis = list(titlefont = list(size = 13),
+#                    tickfont = list(size = 13),
+#                    gridcolor = grey(.7))
+#     )
+#   gg
+```
+
+
+# Predictors of trends: relative importance
+
+These are the main taxonomic and habitat drivers of species' yearly trends resulting from a predictive machine learning model (random forest).
+
+```{r predictor-importance, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.height=7, fig.width=12, out.width='100%'}
+# Importance
+imp <- sort(importance(area_of_interest$rf), decreasing = FALSE) %>% stack()
+
+ggplot(imp, aes(x = ind, y = values)) +
+  geom_col(fill = "#4275D0") +
+  coord_flip() +
+  theme_linedraw() +
+  theme(
+    legend.position = "none",
+    panel.grid = element_line(color = grey(.8)),
+    strip.text = element_text(size = 16),
+    axis.text.y = element_text(size = 15),
+    axis.text.x = element_text(size = 15, angle = 45, hjust = 1),
+    axis.title = element_text(size = 15)
+  ) +
+  labs(
+    y = "Variable Importance",
+    x = ""
+  )
+```
+
+# Predictors of trends: taxon partial effects
+
+These are the strongest positive and negative relationships between taxonomic groups and yearly trend. Categories with values above or below 0 are associated with more positive or more negative yearly trends, respectively.
+
+```{r taxon-partial-effects, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.height=7, fig.width=12, out.width='100%'}
+get_partials_byTaxon <- function(taxonomic_scale = "phylum"){
+  
+  taxon_plot <- partial(
+    area_of_interest$rf,
+    pred.var = taxonomic_scale,
+    train = area_of_interest$rf_data, 
+    plot = TRUE, 
+  )
+  
+  taxon_df <- data.frame(taxa = as.factor(taxon_plot$panel.args[[1]]$x),
+                         trend = taxon_plot$panel.args[[1]]$y
+  ) 
+  
+  freq <- table(area_of_interest$rf_data[[taxonomic_scale]])
+  taxon_df_extremes <- taxon_df %>% 
+    mutate(n = freq[taxa]) %>%
+    filter(n >= 3) %>%
+    dplyr::filter(
+      trend < quantile(trend, .25) | trend > quantile(trend, .75)
+    ) 
+  taxon_df_extremes <- taxon_df_extremes %>% 
+    dplyr::mutate(
+      taxa = factor(taxa, levels = taxon_df_extremes %>% dplyr::arrange(desc(trend)) %>% dplyr::pull(taxa))
+    )
+  
+  ggplot(taxon_df_extremes, aes(x = taxa, y = trend)) +
+  geom_col(fill = "#4275D0") +
+  coord_flip() +
+  theme_linedraw() +
+theme(
+    legend.position = "none",
+    panel.grid = element_line(color = grey(.8)),
+    strip.text = element_text(size = 16),
+    axis.text.y = element_text(size = 15),
+    axis.text.x = element_text(size = 15, angle = 45, hjust = 1),
+    axis.title = element_text(size = 15)
+  ) +
+  labs(
+    y = "Trend",
+    x = ""
+  )
+  
+}
+get_partials_byTaxon(taxonomic_scale = "class")
+```
+
+# Predictors of trends: habitat partial effects
+
+These are the strongest positive and negative relationships between habitats and yearly trend. Categories with values above or below 0 are associated with more positive or more negative yearly trends, respectively.
+
+```{r habitat-partial-effects, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.height=7, fig.width=12, out.width='100%'}
+get_partials_byHabitat <- function(habitats = gsub(" |-", "_", area_of_interest$major_habitats)){
+  
+  habitat_partials <- purrr::map(1:length(habitats), function(hab){
+    
+    habitat_plot <- pdp::partial(
+      area_of_interest$rf,
+      pred.var = habitats[hab],
+      train = area_of_interest$rf_data, 
+      plot = TRUE, 
+    )
+    
+    freq <- table(area_of_interest$rf_data[[habitats[hab]]])
+    
+    habitat_df <- data.frame(habitat = as.factor(habitat_plot$panel.args[[1]]$x),
+                             trend = habitat_plot$panel.args[[1]]$y
+    ) %>% 
+      mutate(n = freq[habitat]) %>%
+      dplyr::filter(habitat == 1) %>% 
+      dplyr::mutate(habitat = gsub("_", " ", habitats[hab]))
+    
+   if (nrow(habitat_df) == 0) habitat_df <- NULL
+    
+    habitat_df
+    
+  }) %>% 
+    bind_rows() %>% 
+    purrr::compact()
+  
+    habitat_partials <- habitat_partials %>% 
+    dplyr::mutate(
+      habitat = factor(habitat, levels = habitat_partials %>% dplyr::arrange(desc(trend)) %>% dplyr::pull(habitat))
+    )
+  
+  ggplot(habitat_partials, aes(x = habitat, y = trend)) +
+  geom_col(fill = "#4275D0") +
+  coord_flip() +
+  theme_linedraw() +
+    theme(
+      legend.position = "none", 
+      panel.grid = element_line(color = grey(.8)),
+      strip.text = element_text(size = 16),
+    axis.text.y = element_text(size = 15),
+    axis.text.x = element_text(size = 15, angle = 45, hjust = 1),
+    axis.title = element_text(size = 15)
+    ) +
+  labs(
+    y = "Trend",
+    x = ""
+  )
+  
+}
+
+get_partials_byHabitat()
+```

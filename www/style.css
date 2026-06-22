@@ -12,7 +12,7 @@
 .container-fluid {
 padding-left: 0;
 padding-right: 0;
-} 
+}
 
 .body {
   font-family: 'Roboto', sans-serif;
@@ -116,6 +116,18 @@ outer {
 
 table.dataTable {
   font-size: 12px;
+}
+
+table.dataTable tbody td {
+    border-top: 1px solid #ececec;
+}
+
+table.dataTable.no-footer {
+    border-bottom: none;
+}
+
+table.dataTable tbody tr {
+    background-color: white;
 }
 
 .selectize-input 
@@ -366,12 +378,12 @@ html {
   min-height: 50px;
   margin-bottom: 0;
   border: 1px solid transparent;
-  color: #1F417D;
+  color: #585032;
 }
 
 .navbar-default .navbar-nav>.active>a {
   font-family: 'Roboto', sans-serif;
-  color: #1F417D;
+  color: #585032;
   background-color: white;
 }
 
@@ -384,7 +396,7 @@ html {
 
 h1, h2, h3, h4, h5, p {
   font-family: 'Roboto', sans-serif;
-  color: #1F417D;
+  color: #585032;
 }
 
 

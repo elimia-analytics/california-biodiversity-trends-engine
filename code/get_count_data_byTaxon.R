@@ -1,5 +1,5 @@
 # Function to get count data from records
-get_count_data <- function(
+get_count_data_byTaxon <- function(
     records, 
     focal_taxon_name, 
     by_reference_taxon = FALSE,
@@ -56,7 +56,8 @@ get_count_data <- function(
   
 }
 
-get_species_trends <- memoise(function(
+area_of_interest <- readRDS("data/outputs/One Tam Area of Interest_data.rds")
+get_major_taxon_trends <- memoise(function(
     analysis_records = area_of_interest$gbif_data, 
     focal_taxon, 
     use_reference_taxon = TRUE, 
@@ -98,13 +99,13 @@ get_species_trends <- memoise(function(
   # suggested_baseline_taxon <- taxonomic_scale_counts[which.min(abs((taxonomic_scale_counts$n[1]*10)-taxonomic_scale_counts$n)[-1])+1,"taxonomic_level"]
   # 
   # Identify reference taxon name
-  reference_taxon <- analysis_records %>% dplyr::filter_all(any_vars(. %in% focal_taxon)) %>% dplyr::pull(reference_taxon_rank) %>% unique()
+  reference_taxon <- analysis_records %>% dplyr::filter_all(any_vars(. %in% focal_taxon)) %>% dplyr::pull(all_of(use_reference_taxon_rank)) %>% unique()
   
   # if (taxonomic_scale_counts$n[taxonomic_scale_counts$taxonomic_level == suggested_baseline_taxon] < (1.5*taxonomic_scale_counts$n[1])) suggested_baseline_taxon <- taxonomic_scale_counts$taxonomic_level[which(taxonomic_scale_counts$taxonomic_level == suggested_baseline_taxon)+1]
   
   # Get observed trends
   ## Get observed detection history
-  counts_observed <- get_count_data(
+  counts_observed <- get_count_data_byTaxon(
     records = analysis_records, 
     focal_taxon_name = focal_taxon, 
     by_reference_taxon = use_reference_taxon, 
@@ -187,7 +188,7 @@ taxon_trends <- vector("list", length = 4)
 names(taxon_trends) <- c("Amphibia", "Aves", "Mammalia", "Squamata")
 for (i in 1:length(taxon_trends)){
  
-  taxon_trends[[i]] <- purrr::safely(get_species_trends)(analysis_records = area_of_interest$gbif_data,
+  taxon_trends[[i]] <- purrr::safely(get_major_taxon_trends)(analysis_records = area_of_interest$gbif_data,
                                            focal_taxon = names(taxon_trends)[i],
                                            use_reference_taxon = TRUE,
                                            use_reference_taxon_rank = "phylum", 
