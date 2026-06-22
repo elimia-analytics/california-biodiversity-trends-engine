@@ -17,6 +17,17 @@ read_github_rds <- function(owner, repo, path, file, branch = "main") {
   download.file(url, tmp, mode = "wb", quiet = TRUE)
   readRDS(tmp)
 }
+
+## Read .rds object from GitHub repository
+read_github_tif <- function(owner, repo, path, file, branch = "main") {
+  url <- sprintf(
+    "https://raw.githubusercontent.com/%s/%s/%s/%s/%s",
+    owner, repo, branch, path, file
+  )
+  tmp <- tempfile(fileext = ".tif")
+  download.file(url, tmp, mode = "wb", quiet = TRUE)
+  terra::rast(tmp)
+}
 ## Extract GBIF data
 ## Extract GBIF data
 get_gbif_data <- memoise(function(

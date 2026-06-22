@@ -152,8 +152,9 @@ table.dataTable tbody tr {
               height: 100px;
               width: 800px;
               position:fixed;
-              top: calc(50% - 50px);;
-              left: calc(50% - 400px);;
+              top: calc(50% - 50px);
+              left: calc(50% - 400px);
+              background-color: transparent;
             }
 
 .nav-pills>li>a, .nav-pills>li.active>a {

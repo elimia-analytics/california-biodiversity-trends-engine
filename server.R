@@ -14,6 +14,7 @@
 # lapply(app_libraries, library, character.only = TRUE)
 library(tidyverse)
 library(patchwork)
+library(rmarkdown)
 library(shiny) 
 library(shinyjs) 
 library(shinyWidgets) 
@@ -2303,6 +2304,13 @@ function(input, output, session) {
           file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_data_full.rds"))
         )
         
+        sampling_coldspots <- read_github_tif(
+          owner = "elimia-analytics",
+          repo  = "california-biodiversity-trends-engine",
+          path  = "data/outputs",
+          file  = gsub(" ", "%20", paste0(input$select_map_aoi, "_sampling_coldspots.tif"))
+        )
+        
         aoi$rf$forest$independent.variable.names <- gsub(" |-", "_", aoi$rf$forest$independent.variable.names)
         names(aoi$rf_data) <- gsub(" |-", "_", names(aoi$rf_data))
         aoi$major_habitats <- gsub(" ", "_", aoi$major_habitats)
@@ -2313,14 +2321,13 @@ function(input, output, session) {
           ".html"
         )
         
-        # aoi <- reactiveValuesToList(area_of_interest)
-        
         rmarkdown::render(
-          "insights_report.Rmd",
+          "insights_report.rmd",
           output_file = outfile,
           params = list(
             area_of_interest = aoi,
-            report_title = paste0("Biodiversity Insights Report - ", area_of_interest$boundary$aoi_name[1])
+            report_title = paste0("Biodiversity Insights Report - ", area_of_interest$boundary$aoi_name[1]),
+            sampling_coldspots = sampling_coldspots
           ),
           envir = new.env(parent = globalenv()),
           quiet = TRUE

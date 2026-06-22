@@ -12,6 +12,7 @@ output:
 params:
   area_of_interest: area_of_interest
   report_title: report_title
+  sampling_coldspots: sampling_coldspots
 ---
 
 ```{r setup, message = FALSE, warning = FALSE, include = FALSE}
@@ -43,6 +44,7 @@ source("biodiversity_trends_engine_functions.R")
 tmap_mode("plot")
 
 area_of_interest <- params$area_of_interest
+sampling_coldspots <- params$sampling_coldspots
 
 library(gt)
 
@@ -129,7 +131,6 @@ Sampling coldspots are locations across the conservation area of interest where 
 
 ```{r coldspots-map, include = TRUE, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 #### Where are the most underrepresented and undersampled habitats?
-sampling_coldspots <- terra::rast(paste0("data/outputs/", area_of_interest$boundary$aoi_name[1], "_sampling_coldspots.tif"))
 m <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, attributionControl = FALSE, worldCopyJump = FALSE)) %>% 
   leaflet::addProviderTiles(providers$Esri.WorldStreetMap) %>%
   leaflet::addRasterImage(
@@ -137,6 +138,12 @@ m <- leaflet::leaflet(options = leafletOptions(zoomDelta = 0.5, zoomSnap = 0, at
     colors = "#CD0600",
     opacity = 0.9
   ) %>% 
+  leaflet::addPolygons(
+    data = area_of_interest$boundary,
+    color = grey(.2),
+    fillOpacity = 0.1,
+    fill = FALSE
+  ) %>%
   leaflet::addLegend(
     position = "bottomleft", 
     colors = "#CD0600", 
