@@ -3,16 +3,16 @@
 **********************************************************************/
 
 
-@media (min-width: 1600px) { 
+@media (min-width: 1800px) { 
  
  html {
   zoom: 100%;
 }
 
 .container-fluid {
-padding-left: 0;
-padding-right: 0;
-}
+padding-left: 20px;
+padding-right: 20px;
+} 
 
 .body {
   font-family: 'Roboto', sans-serif;
@@ -98,8 +98,8 @@ label {
 }
 
 outer {
-  margin: 0px;
-  padding: 0px;
+  margin: 0 0 0 20px;
+  padding: 0 0 0 20px;
 }
 
 .leaflet-container {
@@ -147,6 +147,40 @@ table.dataTable tbody tr {
 .leaflet-marker-pane {
   z-index: 1000 !important;
 }
+
+      .bslib-sidebar-layout > .collapse-toggle {
+        width: 42px;
+        height: 42px;
+        top: 15px !important;
+        z-index: 1000;
+        height: 2.5em;
+        width: 2.5em;
+      }
+      
+            /* Resize the icon */
+      .bslib-sidebar-layout > .collapse-toggle > .collapse-icon {
+        width: 24px !important;
+        height: 24px !important;
+      }
+      
+      /* =========================
+         Expanded sidebar
+      ========================== */
+
+      .bslib-sidebar-layout > .sidebar {
+        transition: width 0.2s ease;
+      }
+
+      /* =========================
+         Collapsed sidebar rail
+      ========================== */
+
+      .bslib-sidebar-layout.sidebar-collapsed > .sidebar {
+        width: 56px !important;
+        min-width: 56px !important;
+        background-color: #f7f7f7 !important; 
+        border: 1px solid #e0e0e0 !important;
+      }
 
 .shiny-notification {
               height: 100px;
@@ -335,7 +369,7 @@ table.dataTable.display>tbody>tr.even.selected>*
                             Small screens, phones
 **********************************************************************/
 
-@media (max-width: 1599px) {
+@media (max-width: 1799px) {
 
  
 .container-fluid {
@@ -607,15 +641,6 @@ table.dataTable th.dt-center, table.dataTable td.dt-center, table.dataTable td.d
   border-right-color: black;
 }
 
-.bslib-sidebar-layout>.sidebar {
-  width: 400px !important;
-}
-
-        .bslib-sidebar-layout > .collapse-toggle {
-            position: relative;
-            float: right;
-        }
-
 .leaflet-popup-content-wrapper {
   overflow: scroll !important;
   height: 200px;
@@ -647,5 +672,42 @@ table.dataTable.display>tbody>tr.even.selected>*
 .checkbox input[type=checkbox], .checkbox-inline input[type=checkbox], .radio input[type=radio], .radio-inline input[type=radio] {
   margin-top: 2px !important;
 }
+
+
+      .bslib-sidebar-layout > .collapse-toggle {
+        width: 42px;
+        height: 42px;
+        top: 15px !important;
+        z-index: 1000;
+        height: 2.5em;
+        width: 2.5em;
+      }
+      
+            /* Resize the icon */
+      .bslib-sidebar-layout > .collapse-toggle > .collapse-icon {
+        width: 24px !important;
+        height: 24px !important;
+      }
+      
+      /* =========================
+         Expanded sidebar
+      ========================== */
+
+      .bslib-sidebar-layout > .sidebar {
+        /*width: 17vw !important; */
+        transition: width 0.2s ease;
+      }
+
+      /* =========================
+         Collapsed sidebar rail
+      ========================== */
+
+      .bslib-sidebar-layout.sidebar-collapsed > .sidebar {
+        width: 56px !important;
+        min-width: 56px !important;
+        background-color: #f7f7f7 !important; 
+        border: 1px solid #e0e0e0 !important;
+      }
+
 
 }

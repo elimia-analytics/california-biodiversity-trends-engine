@@ -38,6 +38,7 @@ library(bslib)
 library(ranger)
 library(pdp)
 library(leaflet)
+library(memoise)
 
 source("biodiversity_trends_engine_functions.R")
 
@@ -183,13 +184,9 @@ area_of_interest$underrepresented_habitats_species |>
 
 Representation refers to the degree of available information for a taxon given how frequently it occurs across the conservation area of interest. We estimate representation by assuming that the number of species ever recorded within a higher taxon is proportional to the likelihood of encountering them across the conservation area of interest. Under-represented and over-represented taxa are those which are recorded relatively less or more than expected given the number of species they include, respectively.
 
-```{r undersampled-taxa, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+```{r undersampled-taxa, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
 # Records representation
 df <- area_of_interest$underrepresented_taxa %>% as.data.frame()
-
-print(class(df))
-print(names(df))
-str(df)
 
 p1 <- ggplot(df, aes(group = taxon, x = proportion_species, y = proportion_records, fill = records_representation)) +
     ggplot2::geom_abline(intercept = 0, slope = 1) +
@@ -231,6 +228,58 @@ gg <- plotly::plotly_build(p) %>%
                    gridcolor = grey(.7))
     )
 gg
+```
+
+# Largest trends in species' reporting rates
+
+These are the (up to) 10 species showing the most positive and most negative trends in reporting rate anomaly. These species are being increasingly over- and under-reported compared to their historical rates of reporting at the same locations.
+
+```{r biggest-movers, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+##### What species are associated with those habitats?
+rbind(
+        area_of_interest$biggest_movers_table %>%
+          dplyr::filter(trend == "increasing") %>%
+          dplyr::arrange(desc(reporting_rate_above_0_last_ten), desc(reporting_rate_trend_last_ten), desc(reporting_rate_trend_last_five)) %>%
+          dplyr::slice_head(n = 10),
+        area_of_interest$biggest_movers_table %>%
+          dplyr::filter(trend == "decreasing") %>%
+          dplyr::arrange(desc(reporting_rate_below_0_last_ten), reporting_rate_trend_last_ten, reporting_rate_trend_last_five) %>%
+          dplyr::slice_head(n = 10)
+      ) |>
+            dplyr::select(-trend_icon) |>
+  dplyr::distinct(species, .keep_all = TRUE) |>
+          dplyr::mutate(
+            reporting_rate_trend_last_five = sprintf("%.2f", reporting_rate_trend_last_five),
+            reporting_rate_trend_last_ten = sprintf("%.2f", reporting_rate_trend_last_ten),
+            trend = ifelse(trend == "increasing", "arrow-up", "arrow-down")
+          ) |>
+          dplyr::select(-reporting_rate_above_0_last_ten, -reporting_rate_below_0_last_ten) %>%
+  
+  gt() |>
+
+  cols_label(
+            species = "Species",
+            trend = "Trend",
+            number_records = "Total records",
+            number_years_recorded = "Years recorded",
+            reporting_rate_trend_last_five = "5-year trend",
+            reporting_rate_trend_last_ten = "10-year trend"
+
+  ) |>
+
+  fmt_icon(
+    columns = trend,
+    fill_color = c("arrow-up" = "#67a9cf", "arrow-down" = "#ef8a62") 
+  ) |>
+  tab_style(
+    style = cell_fill(color = "#67a9cf30"), 
+    locations = cells_body(rows = trend == "arrow-up") 
+  ) |>
+  tab_style(
+    style = cell_fill(color = "#ef8a6230"), 
+    locations = cells_body(rows = trend == "arrow-down")
+  ) |>
+  theme_report_table()
 ```
 
 # Average trends across taxa

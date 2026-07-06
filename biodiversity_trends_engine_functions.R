@@ -1121,22 +1121,7 @@ plot_yearly_trends <- memoise(function(sd_dat, metric = c("proportion_observatio
   metric <- match.arg(metric)
   reference_taxon <- sd_dat$reference_taxon[1]
   lim_x <- c(min(c(min(sd_dat$year, na.rm = TRUE), 1950)), max(sd_dat$year, na.rm = TRUE))
-  
-  sd_dat <- sd_dat %>%
-    arrange(year) %>%
-    mutate(
-      
-      anomaly_lower_smooth =
-        zoo::rollmax((reporting_rate - reporting_rate_lower)/reporting_rate_sdev, FUN = min, na.rm = TRUE, 1, fill = NA),
-      
-      anomaly_upper_smooth =
-        zoo::rollmax((reporting_rate - reporting_rate_upper)/reporting_rate_sdev, 1, na.rm = TRUE, fill = NA),
-      
-      anomaly_sign =
-        ifelse(reporting_rate_sd >= 0,
-               "Positive",
-               "Negative")
-    )
+  if (is.null(sd_dat$focal_taxon[1])) sd_dat$focal_taxon <- "focal taxon"
   
   scale_factor <-
     quantile(sd_dat$focal_species_count, .95, na.rm = TRUE) /
@@ -1206,7 +1191,14 @@ plot_yearly_trends <- memoise(function(sd_dat, metric = c("proportion_observatio
   
   if ("reporting_rate_mn" %in% names(sd_dat)){
     
-    print(sd_dat %>% dplyr::select(reporting_rate_sd, anomaly_sign) %>% tail(5))
+    sd_dat <- sd_dat %>%
+      arrange(year) %>%
+      mutate(
+        anomaly_sign =
+          ifelse(reporting_rate_sd >= 0,
+                 "Positive",
+                 "Negative")
+      )
     
     p2 <- sd_dat %>% 
       ggplot(aes(x=year, y=reporting_rate_sd)) +
